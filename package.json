@@ -1,0 +1,25 @@
+{
+  "name": "boatbattle",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Bataille navale laser et miroirs, à deux joueurs, en pair à pair (PWA).",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "@fontsource/newsreader": "5.2.10",
+    "jsqr": "1.4.0",
+    "qrcode-generator": "2.0.4"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "5.0.5"
+  }
+}
