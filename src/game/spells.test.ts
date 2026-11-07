@@ -96,17 +96,31 @@ describe('sorts', () => {
     expect(guest.state.placement.length).toBe(cat.pieces.length);
   });
 
-  it('Tempête : mélange MA grille, sans prévenir l’adversaire', async () => {
+  it('Tempête publique : ma grille est mélangée, pièces coulées comprises, et le carnet adverse repart à zéro', async () => {
     const { host, guest } = await game();
-    const before = JSON.stringify(host.state.placement);
-    const oppBefore = JSON.stringify(guest.state.placement);
-    host.state.spells.push('shuffle');
-    expect(host.cast('shuffle')).toBe(true);
+    // l'hôte coule une pièce et prend des notes
+    const dead = guest.state.placement[0];
+    const def = cat.pieces.find((d) => d.id === dead.pieceId)!;
+    host.claim({ color: def.color, shape: def.shape, cells: placementParts(dead, cat) });
     await flush();
-    expect(JSON.stringify(host.state.placement)).not.toBe(before);
-    expect(JSON.stringify(guest.state.placement)).toBe(oppBefore);
-    expect(guest.state.log[0].action).toEqual({ kind: 'spell', spell: 'self' });
-    expect(validatePlacement(host.state.placement, host.catalog!, { requireAll: true }).length).toBe(0);
+    host.setNotes({ marks: { '0,0': 'x' }, guesses: [] });
+    guest.shoot({ side: 'top', index: 0 });
+    await flush();
+    expect(host.oppSunk.length).toBe(1);
+    const before = JSON.stringify(guest.state.placement);
+    guest.state.spells.push('shuffle');
+    expect(host.isMyTurn).toBe(true);
+    host.shoot({ side: 'top', index: 1 });
+    await flush();
+    expect(guest.cast('shuffle')).toBe(true);
+    await flush();
+    expect(JSON.stringify(guest.state.placement)).not.toBe(before);
+    expect(guest.mySunk.size).toBe(0); // la pièce coulée est revenue en jeu
+    expect(validatePlacement(guest.state.placement, guest.catalog!, { requireAll: true }).length).toBe(0);
+    expect(host.state.log[host.state.log.length - 1].action).toEqual({ kind: 'spell', spell: 'shuffle' });
+    expect(host.oppSunk.length).toBe(0);
+    expect(host.state.notes).toEqual({ marks: {}, guesses: [] });
+    expect(host.notesResetAt).toBe(host.state.log.length - 1);
   });
 
   it('Salve, Rafale et Double tir fonctionnent', async () => {
@@ -241,10 +255,10 @@ describe('sorts', () => {
     host.claim({ color: def.color, shape: def.shape, cells: placementParts(dead, cat) });
     await flush();
     expect(guest.mySunk.has(dead.pieceId)).toBe(true);
-    // Tempête : les pièces à flot peuvent maintenant occuper la place de la pièce coulée
+    // Déménagement : les pièces à flot peuvent maintenant occuper la place de la pièce coulée
     for (let i = 0; i < 6; i++) {
-      guest.state.spells.push('shuffle');
-      guest.cast('shuffle');
+      guest.state.spells.push('relocate');
+      guest.cast('relocate');
       await flush();
       host.shoot({ side: 'top', index: 0 });
       await flush();

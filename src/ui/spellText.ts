@@ -66,6 +66,8 @@ export function describeSpell(e: TurnEntry, catalog: Catalog | null, selfSpell?:
       const shape = catalog?.shapes[r.piece.shape]?.name ?? r.piece.shape;
       return `Renfort : une pièce de plus (${shape} ${colorName(r.piece.color)})`;
     }
+    case 'shuffle':
+      return 'Tempête : la grille est mélangée, le carnet adverse est remis à zéro';
     case 'revive': {
       const shape = catalog?.shapes[a.shape ?? '']?.name ?? a.shape ?? 'pièce';
       return `Résurrection : ${shape} ${a.color ? colorName(a.color) : ''} revient en jeu en ${(a.cells ?? []).map(cellLabel).join(', ')}`;

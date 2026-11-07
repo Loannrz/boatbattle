@@ -47,7 +47,7 @@ export const SPELLS: readonly SpellDef[] = [
   { id: 'silence', name: 'Silence', desc: 'L’adversaire ne pourra pas lancer de sort à son prochain tour.', target: 'opp', param: 'none' },
   { id: 'freeze', name: 'Gel', desc: 'Ne prend pas ton tour : tu joues ensuite deux tours de suite avant que l’adversaire reprenne la main.', target: 'opp', param: 'none' },
   { id: 'addpiece', name: 'Renfort', desc: 'Ajoute une pièce de ton choix à TA grille, où tu veux : l’adversaire a une pièce de plus à trouver. Il la voit apparaître dans son carnet, mais pas où elle est.', target: 'opp', param: 'piece' },
-  { id: 'shuffle', name: 'Tempête', desc: 'Mélange toute TA grille au hasard : les notes de l’adversaire deviennent fausses. Il n’est pas prévenu.', target: 'self', param: 'none' },
+  { id: 'shuffle', name: 'Tempête', desc: 'Mélange toute TA grille au hasard, y compris tes pièces coulées qui reviennent en jeu. L’adversaire le voit : son carnet est remis à zéro (croix, formes supposées et pièces coulées) et il doit tout retrouver.', target: 'opp', param: 'none' },
   { id: 'relocate', name: 'Déménagement', desc: 'Déplace une de tes pièces à flot au hasard sur un nouvel emplacement libre, sans que l’adversaire le sache.', target: 'self', param: 'none' },
   { id: 'pivot', name: 'Pivot', desc: 'Fait pivoter une de tes pièces à flot sur place, sans que l’adversaire le sache.', target: 'self', param: 'none' },
   { id: 'revive', name: 'Résurrection', desc: 'Ressuscite une de tes pièces coulées, au hasard. L’adversaire voit laquelle revient en jeu (elle n’est plus « coulée » dans son carnet) et peut la couler de nouveau. Elle revient à sa place, ou ailleurs en secret si une autre pièce l’occupe maintenant.', target: 'opp', param: 'revived' },

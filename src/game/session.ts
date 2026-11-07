@@ -405,12 +405,20 @@ export class PlayerSession {
     return out;
   }
 
+  /** Numéro du dernier tour où l'adversaire a mélangé sa grille (-1 = jamais) : mes anciennes infos sont périmées. */
+  get notesResetAt(): number {
+    let n = -1;
+    for (const e of this.state.log) if (e.by === this.opp && e.action.kind === 'spell' && e.action.spell === 'shuffle') n = e.n;
+    return n;
+  }
+
   /** Pièces adverses que j'ai coulées (déclarations exactes), moins celles qu'il a ressuscitées. */
   get oppSunk(): Claim[] {
     const out: Claim[] = [];
     const key = (cells: { r: number; c: number }[]) => cells.map(cellKey).sort().join('|');
     for (const e of this.state.log) {
       if (e.by === this.state.me && e.action.kind === 'claim' && e.result.kind === 'claim' && e.result.ok) out.push(e.action.claim);
+      else if (e.by === this.opp && e.action.kind === 'spell' && e.action.spell === 'shuffle') out.length = 0; // grille mélangée : tout est à refaire
       else if (e.by === this.opp && e.action.kind === 'spell' && e.action.spell === 'revive' && e.action.cells && e.action.color && e.action.shape) {
         const { color, shape } = e.action;
         const k = key(e.action.cells);
@@ -855,6 +863,10 @@ export class PlayerSession {
         const got = s.spells.splice(Math.floor(this.random() * s.spells.length), 1)[0];
         return done({ got });
       }
+      case 'shuffle':
+        // La grille adverse est mélangée : mon carnet est remis à zéro.
+        s.notes = { marks: {}, guesses: [] };
+        return done({});
       case 'silence':
         s.silenced = true;
         return done({});
@@ -920,8 +932,15 @@ export class PlayerSession {
     let action: SpellAction;
     let reviveId: string | null = null;
     let newSpot: Placement | null = null;
+    let shuffled: Placement[] | null = null;
     if (def.target === 'self') {
       action = { kind: 'spell', spell: 'self' };
+    } else if (id === 'shuffle') {
+      // Tempête publique : TOUTES mes pièces sont replacées au hasard, les coulées reviennent en jeu.
+      const next = tryRandomPlacement({ ...this.catalog!, pieces: this.myPieces }, { random: () => this.random() });
+      if (!next) return false;
+      shuffled = next;
+      action = { kind: 'spell', spell: 'shuffle' };
     } else if (id === 'revive') {
       // Résurrection publique : l'adversaire voit quelle pièce revient en jeu.
       const ids = [...this.mySunk];
@@ -951,6 +970,10 @@ export class PlayerSession {
     }
     s.spells.splice(s.spells.indexOf(id), 1);
     if (added) s.placement = [...s.placement, added];
+    if (shuffled) {
+      for (const sunkId of this.mySunk) s.revives.push({ n, id: sunkId });
+      s.placement = shuffled;
+    }
     if (reviveId) {
       s.revives.push({ n, id: reviveId });
       if (newSpot) {
@@ -1013,14 +1036,6 @@ export class PlayerSession {
           }
         }
         return false;
-      }
-      case 'shuffle': {
-        // seules les pièces à flot sont mélangées ; les pièces coulées restent où elles sont
-        const sunk = this.mySunk;
-        const next = tryRandomPlacement({ ...this.catalog!, pieces: this.myPieces.filter((p) => !sunk.has(p.id)) }, { random: rnd });
-        if (!next) return false;
-        s.placement = [...s.placement.filter((p) => sunk.has(p.pieceId)), ...next];
-        return true;
       }
       case 'mirage':
         s.fx.mirage = true;

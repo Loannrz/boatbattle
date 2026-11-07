@@ -264,7 +264,7 @@ export function spellsTab(app: App, session: PlayerSession): HTMLElement {
           'div',
           { class: 'spell-head' },
           h('strong', null, def.name),
-          h('span', { class: `tag ${def.target === 'self' ? 'tag-muted' : 'tag-ok'}` }, def.target === 'self' ? 'secret' : def.id === 'addpiece' ? 'public' : 'vise l’adversaire'),
+          h('span', { class: `tag ${def.target === 'self' ? 'tag-muted' : 'tag-ok'}` }, def.target === 'self' ? 'secret' : ['addpiece', 'revive', 'shuffle'].includes(def.id) ? 'public' : 'vise l’adversaire'),
           count !== null && count > 1 ? h('span', { class: 'count' }, `×${count}`) : null,
         ),
         h('p', { class: 'muted small' }, def.desc),

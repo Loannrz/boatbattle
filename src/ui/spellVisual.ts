@@ -74,6 +74,8 @@ export function spellOverlays(e: TurnEntry, selfSpell?: string): Overlay[] {
     case 'salve':
     case 'rafale':
       return (a.edges ?? []).map(edgeBand);
+    case 'shuffle':
+      return [{ kind: 'glyph', text: '⇄' }, { kind: 'caption', text: 'Grille mélangée : carnet remis à zéro' }];
     case 'revive':
       return [{ kind: 'cells', tone: 'found', cells: (a.cells ?? []).map((x) => ({ r: x.r, c: x.c, fill: hex(a.color) })) }, { kind: 'caption', text: 'Pièce ressuscitée' }];
     case 'spy':

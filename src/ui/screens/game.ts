@@ -120,8 +120,9 @@ function sunkAsPlacements(claims: Claim[], catalog: Catalog): { placements: Boar
 /** Mes tirs (simples ou multiples) : entrée choisie et sortie. Un tour = un groupe. */
 function myShots(session: PlayerSession): { edge: Edge; exit: Edge }[][] {
   const groups: { edge: Edge; exit: Edge }[][] = [];
+  const resetAt = session.notesResetAt;
   for (const e of session.state.log) {
-    if (e.by !== session.state.me) continue;
+    if (e.by !== session.state.me || e.n < resetAt) continue; // tirs d'avant un mélange de la grille adverse : périmés
     if (e.action.kind === 'shot' && e.result.kind === 'shot') groups.push([{ edge: e.action.edge, exit: e.result.exit }]);
     else if (e.action.kind === 'spell' && e.result.kind === 'spell' && e.result.shots && e.action.edges) {
       const edges = e.action.edges;
