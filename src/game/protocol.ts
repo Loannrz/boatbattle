@@ -42,6 +42,9 @@ export interface SpellAction {
   index?: number;
   edges?: Edge[];
   color?: string;
+  shape?: string;
+  /** Résurrection : cases de la pièce qui revient en jeu. */
+  cells?: Part[];
   opt?: string;
 }
 
@@ -53,6 +56,10 @@ export interface SpellResult {
   colors?: string[];
   r?: number;
   c?: number;
+  /** Loupe : état de chaque case du bloc. */
+  cells?: { r: number; c: number; color: string | null }[];
+  /** Histogramme : cases occupées par ligne (ou colonne). */
+  counts?: number[];
   shots?: { exit: Edge; colors: string[] }[];
   /** Intrus : pièce ajoutée (null = plus de place, sans effet). */
   piece?: { id: string; shape: string; color: string } | null;
@@ -144,9 +151,18 @@ export function isValidSpellAction(a: Record<string, unknown>): boolean {
     case 'line':
       return (a.axis === 'row' || a.axis === 'col') && isInt(a.index, 0, GRID_SIZE - 1);
     case 'edge2':
-      return Array.isArray(a.edges) && a.edges.length === 2 && a.edges.every(isValidEdge);
-    case 'salve':
-      return Array.isArray(a.edges) && a.edges.length === 3 && a.edges.every(isValidEdge);
+      return Array.isArray(a.edges) && a.edges.length === 2 && a.edges.every((e) => isValidEdge(e));
+    case 'run': {
+      if (!Array.isArray(a.edges) || a.edges.length !== (def.count ?? 3) || !a.edges.every((e) => isValidEdge(e))) return false;
+      const edges = a.edges as Edge[];
+      return edges.every((e, i) => e.side === edges[0].side && e.index === edges[0].index + i);
+    }
+    case 'revived':
+      return isShortText(a.shape, LIMITS.maxId) && isColor(a.color) && Array.isArray(a.cells) && a.cells.length > 0 && a.cells.length <= LIMITS.maxShapeParts && a.cells.every((p) => isValidPart(p));
+    case 'axis':
+      return a.opt === 'row' || a.opt === 'col';
+    case 'piece':
+      return isShortText(a.shape, LIMITS.maxId) && isColor(a.color);
     case 'color':
       return isColor(a.color);
     case 'half':
@@ -173,8 +189,13 @@ function isValidSpellResult(r: Record<string, unknown>): boolean {
   if (r.colors !== undefined && !(Array.isArray(r.colors) && r.colors.length <= 100 && r.colors.every(isColor))) return false;
   if (r.r !== undefined && !isInt(r.r, 0, GRID_SIZE - 1)) return false;
   if (r.c !== undefined && !isInt(r.c, 0, GRID_SIZE - 1)) return false;
+  if (r.counts !== undefined && !(Array.isArray(r.counts) && r.counts.length === GRID_SIZE && r.counts.every((n) => isInt(n, 0, GRID_SIZE)))) return false;
+  if (r.cells !== undefined) {
+    if (!Array.isArray(r.cells) || r.cells.length > 4) return false;
+    for (const x of r.cells) if (!(isObj(x) && isInt(x.r, 0, GRID_SIZE - 1) && isInt(x.c, 0, GRID_SIZE - 1) && (x.color === null || isColor(x.color)))) return false;
+  }
   if (r.shots !== undefined) {
-    if (!Array.isArray(r.shots) || r.shots.length > 3) return false;
+    if (!Array.isArray(r.shots) || r.shots.length > 5) return false;
     for (const s of r.shots) if (!(isObj(s) && isValidEdge(s.exit) && Array.isArray(s.colors) && s.colors.length <= 100 && s.colors.every(isColor))) return false;
   }
   if (r.piece !== undefined && r.piece !== null) {

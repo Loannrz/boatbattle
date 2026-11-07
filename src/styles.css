@@ -1665,3 +1665,26 @@ svg.board:focus-visible {
 .check-row small { display: block; }
 .spells-settings { margin-bottom: 18px; }
 .spells-options { display: grid; gap: 4px; }
+
+/* ---------- visuels des sorts ---------- */
+.overlays { pointer-events: none; }
+.ov-cell { fill: rgba(107, 79, 179, 0.18); stroke: #6b4fb3; stroke-width: 0.5; stroke-dasharray: 1.6 1; animation: ov-pop 0.5s ease-out both; }
+.ov-cell.ov-found { fill-opacity: 0.6; stroke-dasharray: none; stroke-width: 0.8; }
+.ov-empty { fill: none; stroke: #6b4fb3; stroke-width: 0.8; stroke-dasharray: 1.2 1; animation: ov-pop 0.5s ease-out both; }
+.ov-band { fill: rgba(107, 79, 179, 0.16); stroke: #6b4fb3; stroke-width: 0.5; stroke-dasharray: 2 1.2; animation: ov-pop 0.5s ease-out both; }
+.ov-bar { fill: rgba(107, 79, 179, 0.5); animation: ov-pop 0.5s ease-out both; }
+.ov-text { font-size: 4.6px; font-weight: 700; fill: #3d2a73; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: rgba(255, 253, 246, 0.85); stroke-width: 1.1px; }
+.ov-text-band { text-anchor: end; }
+.ov-text-bar { text-anchor: start; font-size: 3.6px; }
+.ov-caption-bg { fill: #3d2a73; opacity: 0.92; animation: ov-pop 0.5s ease-out both; }
+.ov-caption { font-size: 4.2px; font-weight: 700; fill: #fff; text-anchor: middle; dominant-baseline: central; }
+.ov-glyph { font-size: 38px; fill: #6b4fb3; opacity: 0.75; text-anchor: middle; dominant-baseline: central; }
+@keyframes ov-pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ov-cell, .ov-empty, .ov-band, .ov-bar, .ov-caption-bg { animation: none; } }
+.spell-demo-wrap { width: 76px; flex: none; }
+.spell-demo-wrap .board-wrap { margin: 0; }
+.spell-card.has-demo { display: flex; gap: 12px; align-items: flex-start; }
+.spell-body { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.spell-demo { width: 100%; height: auto; display: block; background: var(--paper); border-radius: 6px; }
+.effects { display: grid; gap: 6px; margin: 8px 0; }
+.effect-chip { background: rgba(107, 79, 179, 0.12); border: 1px dashed #6b4fb3; border-radius: 10px; padding: 6px 10px; font-size: 0.85rem; }

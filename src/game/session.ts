@@ -21,8 +21,12 @@ import {
   catalogOf,
   checkClaim,
   pieceDef,
+  blockCells,
   cellKey,
+  centerCells,
   cloneSpellConfig,
+  pivotSpot,
+  ringCells,
   colorsIn,
   DEFAULT_SPELL_CONFIG,
   diagCells,
@@ -120,7 +124,7 @@ export interface PlayerState {
   /** Un sort Silence m'empêche de lancer un sort jusqu'à ma prochaine action. */
   silenced: boolean;
   /** Effets en attente sur le prochain tir reçu. */
-  fx: { fog: boolean; decoy: boolean };
+  fx: { fog: boolean; decoy: boolean; mirage?: boolean; camouflage?: boolean };
   /** Mes pièces ressuscitées (n = numéro du tour où j'ai lancé le sort). */
   revives: { n: number; id: string }[];
   /** Quel sort j'ai lancé au tour n quand il était secret. */
@@ -311,7 +315,7 @@ export class PlayerSession {
     return (1 - this.state.me) as PlayerIndex;
   }
 
-  /** Pièces ajoutées en cours de partie par le sort Intrus (pour le joueur `owner`). */
+  /** Pièces ajoutées en cours de partie par le sort Renfort (à la grille du joueur `owner`). */
   private get extras(): { owner: PlayerIndex; def: PieceDef }[] {
     const set = this.state.pieceSet;
     const out: { owner: PlayerIndex; def: PieceDef }[] = [];
@@ -322,7 +326,13 @@ export class PlayerSession {
       if (r.kind !== 'spell' || r.spell !== 'addpiece' || !r.piece) continue;
       const p = r.piece;
       if (!set.shapes.some((sh) => sh.id === p.shape) || base.some((b) => b.id === p.id) || out.some((x) => x.def.id === p.id)) continue;
-      out.push({ owner: (1 - e.by) as PlayerIndex, def: { id: p.id, shape: p.shape, color: p.color } });
+      out.push({ owner: e.by, def: { id: p.id, shape: p.shape, color: p.color } });
+    }
+    // Renfort que je viens de lancer, pas encore confirmé dans le journal.
+    const pend = this.state.pending;
+    if (pend && pend.action.kind === 'spell' && pend.action.spell === 'addpiece' && pend.action.shape && pend.action.color) {
+      const id = `x${pend.n}.${pend.action.shape}.${pend.action.color}`;
+      if (!out.some((x) => x.def.id === id)) out.push({ owner: this.state.me, def: { id, shape: pend.action.shape, color: pend.action.color } });
     }
     return out;
   }
@@ -395,11 +405,24 @@ export class PlayerSession {
     return out;
   }
 
-  /** Pièces adverses que j'ai coulées (déclarations exactes). */
+  /** Pièces adverses que j'ai coulées (déclarations exactes), moins celles qu'il a ressuscitées. */
   get oppSunk(): Claim[] {
-    return this.state.log
-      .filter((e) => e.by === this.state.me && e.action.kind === 'claim' && e.result.kind === 'claim' && e.result.ok)
-      .map((e) => (e.action as { kind: 'claim'; claim: Claim }).claim);
+    const out: Claim[] = [];
+    const key = (cells: { r: number; c: number }[]) => cells.map(cellKey).sort().join('|');
+    for (const e of this.state.log) {
+      if (e.by === this.state.me && e.action.kind === 'claim' && e.result.kind === 'claim' && e.result.ok) out.push(e.action.claim);
+      else if (e.by === this.opp && e.action.kind === 'spell' && e.action.spell === 'revive' && e.action.cells && e.action.color && e.action.shape) {
+        const { color, shape } = e.action;
+        const k = key(e.action.cells);
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (out[i].color === color && out[i].shape === shape && key(out[i].cells) === k) {
+            out.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+    return out;
   }
 
   // ---------- jeu de pièces ----------
@@ -721,7 +744,11 @@ export class PlayerSession {
       return { n, by, action, result: { kind: 'shot', exit: shot.shots[0].exit, colors: shot.shots[0].colors }, secret: { hits: shot.hits, path: shot.paths[0], paths: shot.paths } };
     }
     if (action.kind === 'spell') return this.resolveSpell(n, action, sunk);
-    const check = checkClaim(s.placement, sunk, action.claim, cat);
+    let check = checkClaim(s.placement, sunk, action.claim, cat);
+    if (s.fx.camouflage) {
+      s.fx.camouflage = false;
+      check = { ok: false };
+    }
     let gameOver = false;
     if (check.ok && check.pieceId) gameOver = this.myPieces.every((p) => p.id === check.pieceId || sunk.has(p.id));
     return {
@@ -738,8 +765,8 @@ export class PlayerSession {
     const s = this.state;
     const cat = this.catalog!;
     const removed = RULES.sunkPiecesAreRemoved ? sunk : new Set<string>();
-    const grid = buildGrid(s.placement, cat, removed);
     const fx = s.fx;
+    const grid = fx.mirage ? buildGrid([], cat) : buildGrid(s.placement, cat, removed);
     const palette = [...new Set(cat.pieces.map((p) => p.color))];
     const shots: { exit: Edge; colors: string[] }[] = [];
     const paths: { x: number; y: number }[][] = [];
@@ -755,6 +782,7 @@ export class PlayerSession {
     });
     fx.fog = false;
     fx.decoy = false;
+    fx.mirage = false;
     return { shots, paths, hits };
   }
 
@@ -794,24 +822,33 @@ export class PlayerSession {
         return done({ r: cell.r, c: cell.c, colors: [cellColor(grid, cat, cell)!] });
       }
       case 'double':
-      case 'salve': {
+      case 'salve':
+      case 'rafale': {
         const shot = this.fire(a.edges ?? [], sunk);
         return done({ shots: shot.shots }, { hits: shot.hits, path: shot.paths[0] ?? [], paths: shot.paths });
       }
-      case 'shuffle': {
-        const next = tryRandomPlacement({ ...cat, pieces: this.myPieces }, { random: this.random });
-        if (next) s.placement = next;
-        return done({});
-      }
       case 'addpiece': {
-        const set = s.pieceSet!;
-        const base = catalogOf(set).pieces;
-        const pick = base[Math.floor(this.random() * base.length)];
-        const def: PieceDef = { id: `x${n}.${pick.shape}.${pick.color}`, shape: pick.shape, color: pick.color };
-        const spot = randomSpot(s.placement, { ...cat, pieces: [...cat.pieces, def] }, def.id, this.random);
-        if (!spot) return done({ piece: null });
-        s.placement = [...s.placement, spot];
-        return done({ piece: def });
+        // La pièce a déjà été posée par le lanceur sur SA grille ; je vérifie seulement qu'elle existe dans le jeu.
+        const base = catalogOf(s.pieceSet!).pieces;
+        const ok = !!a.shape && !!a.color && base.some((b) => b.shape === a.shape && b.color === a.color);
+        return done({ piece: ok ? { id: `x${n}.${a.shape}.${a.color}`, shape: a.shape!, color: a.color! } : null });
+      }
+      case 'loupe':
+        return done({ cells: blockCells(a.r ?? 0, a.c ?? 0).map((cell) => ({ ...cell, color: cellColor(grid, cat, cell) })) });
+      case 'histo': {
+        const counts = Array.from({ length: grid.length }, (_, i) => occupiedCells(grid, lineCells(a.opt === 'col' ? 'col' : 'row', i)).length);
+        return done({ counts });
+      }
+      case 'ring':
+        return done({ count: occupiedCells(grid, ringCells()).length });
+      case 'center':
+        return done({ count: occupiedCells(grid, centerCells()).length });
+      case 'spy':
+        return done({ count: Math.min(s.spells.length, 1000) });
+      case 'sabotage': {
+        if (!s.spells.length) return done({ got: null });
+        const got = s.spells.splice(Math.floor(this.random() * s.spells.length), 1)[0];
+        return done({ got });
       }
       case 'steal': {
         if (!s.spells.length) return done({ got: null });
@@ -849,7 +886,11 @@ export class PlayerSession {
     const r = entry.result;
     if (r.kind !== 'spell') return;
     if (r.spell === 'steal' && r.got && SPELL_IDS.includes(r.got)) s.spells.push(r.got);
-    if (r.spell === 'shuffle') s.notes = { marks: {}, guesses: [] };
+    if (r.spell === 'loupe' && r.cells) {
+      const marks = { ...s.notes.marks };
+      for (const cell of r.cells) marks[cellKey(cell)] = cell.color ? 'x' : 'o';
+      s.notes = { ...s.notes, marks };
+    }
     if (r.spell === 'reveal' && entry.action.kind === 'spell') {
       const k = cellKey({ r: entry.action.r ?? 0, c: entry.action.c ?? 0 });
       s.notes = { ...s.notes, marks: { ...s.notes.marks, [k]: r.occ ? 'x' : 'o' } };
@@ -871,21 +912,54 @@ export class PlayerSession {
   }
 
   /** Lance un sort (remplace le tir du tour). Retourne false si impossible. */
-  cast(id: string, params: Partial<SpellAction> = {}): boolean {
+  cast(id: string, params: Partial<SpellAction> = {}, spot?: { r: number; c: number; rot: 0 | 1 | 2 | 3 }): boolean {
     const def = spellDef(id);
     if (!def || this.spellBlocked(id)) return false;
     const s = this.state;
     const n = s.log.length;
     let action: SpellAction;
+    let reviveId: string | null = null;
+    let newSpot: Placement | null = null;
     if (def.target === 'self') {
       action = { kind: 'spell', spell: 'self' };
+    } else if (id === 'revive') {
+      // Résurrection publique : l'adversaire voit quelle pièce revient en jeu.
+      const ids = [...this.mySunk];
+      if (!ids.length) return false;
+      reviveId = ids[Math.floor(this.random() * ids.length)];
+      const placed = s.placement.find((p) => p.pieceId === reviveId);
+      const rdef = pieceDef(reviveId, this.catalog!);
+      if (!placed || !rdef) return false;
+      // L'adversaire voit les cases où la pièce avait été coulée (il peut ainsi la retirer de son carnet).
+      action = { kind: 'spell', spell: 'revive', shape: rdef.shape, color: rdef.color, cells: placementParts(placed, this.catalog!) };
+      if (!isValidSpellAction(action as unknown as Record<string, unknown>)) return false;
+      // Elle revient à sa place si elle est libre ; sinon (une pièce à flot l'occupe) ailleurs, en secret.
+      const alive = this.alivePlacement();
+      if (validatePlacement([...alive, placed], this.catalog!).length > 0) {
+        const spot = randomSpot(alive, this.catalog!, reviveId, () => this.random());
+        if (!spot) return false;
+        newSpot = spot;
+      }
     } else {
       action = { ...params, kind: 'spell', spell: id } as SpellAction;
       if (!isValidSpellAction(action as unknown as Record<string, unknown>)) return false;
     }
+    let added: Placement | null = null;
+    if (id === 'addpiece') {
+      added = this.addedPlacement(n, action, spot);
+      if (!added) return false;
+    }
     s.spells.splice(s.spells.indexOf(id), 1);
+    if (added) s.placement = [...s.placement, added];
+    if (reviveId) {
+      s.revives.push({ n, id: reviveId });
+      if (newSpot) {
+        const moved = newSpot;
+        s.placement = s.placement.map((p) => (p.pieceId === moved.pieceId ? moved : p));
+      }
+    }
     if (def.target === 'self') {
-      if (!this.applySelf(id, n)) {
+      if (!this.applySelf(id)) {
         s.spells.push(id);
         return false;
       }
@@ -894,17 +968,30 @@ export class PlayerSession {
     return this.act(action);
   }
 
+  /** Mes pièces à flot (les pièces coulées ne bloquent plus leur emplacement). */
+  alivePlacement(): Placement[] {
+    const sunk = this.mySunk;
+    return this.state.placement.filter((p) => !sunk.has(p.pieceId));
+  }
+
+  /** Placement du Renfort lancé au tour n, ou null s'il est invalide (pièce inconnue, hors grille, chevauchement). */
+  private addedPlacement(n: number, action: SpellAction, spot?: { r: number; c: number; rot: 0 | 1 | 2 | 3 }): Placement | null {
+    const set = this.state.pieceSet;
+    if (!set || !spot || !action.shape || !action.color) return null;
+    if (!catalogOf(set).pieces.some((b) => b.shape === action.shape && b.color === action.color)) return null;
+    const def: PieceDef = { id: `x${n}.${action.shape}.${action.color}`, shape: action.shape, color: action.color };
+    const cat = this.catalog!;
+    const cand: Placement = { pieceId: def.id, r: spot.r, c: spot.c, rot: spot.rot };
+    // une pièce coulée n'occupe plus sa place : on peut poser dessus
+    const errors = validatePlacement([...this.alivePlacement(), cand], { ...cat, pieces: [...cat.pieces, def] });
+    return errors.length === 0 ? cand : null;
+  }
+
   /** Effet d'un sort secret sur mon propre plateau. */
-  private applySelf(id: string, n: number): boolean {
+  private applySelf(id: string): boolean {
     const s = this.state;
     const rnd = () => this.random();
     switch (id) {
-      case 'revive': {
-        const ids = [...this.mySunk];
-        if (!ids.length) return false;
-        s.revives.push({ n, id: ids[Math.floor(rnd() * ids.length)] });
-        return true;
-      }
       case 'fog':
         s.fx.fog = true;
         return true;
@@ -918,8 +1005,35 @@ export class PlayerSession {
         const cat = this.catalog!;
         for (let i = 0; i < 5; i++) {
           const chosen = alive[Math.floor(rnd() * alive.length)];
-          const others = s.placement.filter((p) => p.pieceId !== chosen.pieceId);
+          const others = alive.filter((p) => p.pieceId !== chosen.pieceId);
           const spot = randomSpot(others, cat, chosen.pieceId, rnd);
+          if (spot) {
+            s.placement = s.placement.map((p) => (p.pieceId === chosen.pieceId ? spot : p));
+            return true;
+          }
+        }
+        return false;
+      }
+      case 'shuffle': {
+        // seules les pièces à flot sont mélangées ; les pièces coulées restent où elles sont
+        const sunk = this.mySunk;
+        const next = tryRandomPlacement({ ...this.catalog!, pieces: this.myPieces.filter((p) => !sunk.has(p.id)) }, { random: rnd });
+        if (!next) return false;
+        s.placement = [...s.placement.filter((p) => sunk.has(p.pieceId)), ...next];
+        return true;
+      }
+      case 'mirage':
+        s.fx.mirage = true;
+        return true;
+      case 'camouflage':
+        s.fx.camouflage = true;
+        return true;
+      case 'pivot': {
+        const sunk = this.mySunk;
+        const alive = s.placement.filter((p) => !sunk.has(p.pieceId));
+        const cat = this.catalog!;
+        for (const chosen of [...alive].sort(() => rnd() - 0.5)) {
+          const spot = pivotSpot(alive.filter((p) => p.pieceId !== chosen.pieceId), cat, chosen, rnd);
           if (spot) {
             s.placement = s.placement.map((p) => (p.pieceId === chosen.pieceId ? spot : p));
             return true;

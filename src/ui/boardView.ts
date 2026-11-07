@@ -34,6 +34,14 @@ export interface EdgeShade {
   kind: 'in' | 'out' | 'in-last' | 'out-last' | 'both-last';
 }
 
+/** Habillage visuel d'un sort sur la grille. */
+export type Overlay =
+  | { kind: 'cells'; cells: { r: number; c: number; fill?: string; text?: string }[]; tone: 'zone' | 'found' | 'empty' }
+  | { kind: 'band'; axis: 'row' | 'col'; index: number; text?: string }
+  | { kind: 'bars'; axis: 'row' | 'col'; counts: number[] }
+  | { kind: 'caption'; text: string }
+  | { kind: 'glyph'; text: string };
+
 export interface BoardOptions {
   catalog: Catalog | null;
   gutter: 'labels' | 'buttons' | 'none';
@@ -41,6 +49,7 @@ export interface BoardOptions {
   marks?: Record<string, NoteMark>;
   paths?: { points: { x: number; y: number }[]; dim?: boolean }[];
   edgeShades?: EdgeShade[];
+  overlays?: Overlay[];
   selectedEdge?: Edge | null;
   label: string;
   description?: string;
@@ -254,6 +263,44 @@ export function edgeAt(cell: Cell): Edge | null {
   return null;
 }
 
+function drawOverlays(list: readonly Overlay[], G: number): SVGElement {
+  const g = s('g', { class: 'overlays' });
+  const total = N * U + 2 * G;
+  for (const o of list) {
+    if (o.kind === 'cells') {
+      for (const cell of o.cells) {
+        const x = G + cell.c * U;
+        const y = G + cell.r * U;
+        if (o.tone === 'empty') {
+          g.append(s('circle', { cx: x + U / 2, cy: y + U / 2, r: 2.6, class: 'ov-empty' }));
+        } else {
+          g.append(s('rect', { x: x + 0.5, y: y + 0.5, width: U - 1, height: U - 1, rx: 1, class: `ov-cell ov-${o.tone}`, style: cell.fill ? `fill:${cell.fill}` : undefined }));
+        }
+        if (cell.text) g.append(s('text', { x: x + U / 2, y: y + U / 2, class: 'ov-text' }, cell.text));
+      }
+    } else if (o.kind === 'band') {
+      const row = o.axis === 'row';
+      g.append(s('rect', { x: row ? G : G + o.index * U, y: row ? G + o.index * U : G, width: row ? N * U : U, height: row ? U : N * U, class: 'ov-band' }));
+      if (o.text) g.append(s('text', { x: row ? G + N * U - 3 : G + o.index * U + U / 2, y: row ? G + o.index * U + U / 2 : G + 4, class: 'ov-text ov-text-band' }, o.text));
+    } else if (o.kind === 'bars') {
+      const row = o.axis === 'row';
+      o.counts.forEach((n, i) => {
+        const len = Math.max(n, 0) * U * 0.9;
+        g.append(
+          s('rect', row ? { x: G + 0.5, y: G + i * U + 2, width: Math.max(len, 0.8), height: U - 4, rx: 1, class: 'ov-bar' } : { x: G + i * U + 2, y: G + 0.5, width: U - 4, height: Math.max(len, 0.8), rx: 1, class: 'ov-bar' }),
+          s('text', row ? { x: G + len + 2.5, y: G + i * U + U / 2, class: 'ov-text ov-text-bar' } : { x: G + i * U + U / 2, y: G + len + 3.5, class: 'ov-text ov-text-bar' }, String(n)),
+        );
+      });
+    } else if (o.kind === 'caption') {
+      const w = Math.min(total - 4, o.text.length * 2.5 + 8);
+      g.append(s('rect', { x: total / 2 - w / 2, y: total / 2 - 5, width: w, height: 10, rx: 3, class: 'ov-caption-bg' }), s('text', { x: total / 2, y: total / 2, class: 'ov-caption' }, o.text));
+    } else {
+      g.append(s('text', { x: total / 2, y: total / 2, class: 'ov-glyph' }, o.text));
+    }
+  }
+  return g;
+}
+
 export function createBoard(opts: BoardOptions): BoardView {
   const G = opts.gutter === 'none' ? 0 : opts.gutter === 'buttons' ? 1.35 * U : 0.9 * U;
   const total = N * U + 2 * G;
@@ -345,6 +392,9 @@ export function createBoard(opts: BoardOptions): BoardView {
   const pieces = s('g', { class: 'pieces' });
   if (opts.catalog) for (const p of opts.pieces ?? []) pieces.append(drawPiece(p, opts.catalog, G, G));
   svg.append(pieces);
+
+  // sorts : zones, lignes, barres, légendes
+  if (opts.overlays?.length) svg.append(drawOverlays(opts.overlays, G));
 
   // trajets du laser : un fil rouge
   for (const path of opts.paths ?? []) {

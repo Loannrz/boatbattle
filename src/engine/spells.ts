@@ -13,7 +13,7 @@ import { shapePartsRotated, validatePlacement, type Grid, type Placement } from 
 import { GRID_SIZE, rotationCount, type Cell } from './geometry';
 import { pieceDef, type Catalog } from './pieces';
 
-export type SpellParam = 'none' | 'cell' | 'line' | 'edge2' | 'salve' | 'color' | 'half' | 'diag';
+export type SpellParam = 'none' | 'cell' | 'line' | 'axis' | 'edge2' | 'run' | 'color' | 'half' | 'diag' | 'piece' | 'revived';
 
 export interface SpellDef {
   id: string;
@@ -21,28 +21,40 @@ export interface SpellDef {
   desc: string;
   target: 'opp' | 'self';
   param: SpellParam;
+  /** Nombre de bords voisins pour un tir en rafale (param 'run'). */
+  count?: number;
 }
 
 export const SPELLS: readonly SpellDef[] = [
   { id: 'reveal', name: 'Révélation', desc: 'Dévoile une case de la grille adverse : vide ou occupée, et la couleur de la pièce.', target: 'opp', param: 'cell' },
+  { id: 'loupe', name: 'Loupe', desc: 'Dévoile un bloc de 2 × 2 cases, case par case (vide ou occupée, avec la couleur).', target: 'opp', param: 'cell' },
   { id: 'radar', name: 'Radar', desc: 'Compte les cases occupées d’une ligne ou d’une colonne adverse.', target: 'opp', param: 'line' },
+  { id: 'histo', name: 'Histogramme', desc: 'Compte les cases occupées de toutes les lignes, ou de toutes les colonnes, de la grille adverse.', target: 'opp', param: 'axis' },
   { id: 'prisme', name: 'Prisme', desc: 'Donne les couleurs présentes dans une ligne ou une colonne adverse (sans les positions).', target: 'opp', param: 'line' },
   { id: 'sonar', name: 'Sonar', desc: 'Compte les cases occupées et les couleurs dans un carré de 3 × 3 autour d’une case.', target: 'opp', param: 'cell' },
   { id: 'hint', name: 'Indice', desc: 'Dévoile une case occupée au hasard (avec sa couleur).', target: 'opp', param: 'none' },
   { id: 'diag', name: 'Diagonale', desc: 'Compte les cases occupées sur une grande diagonale adverse.', target: 'opp', param: 'diag' },
   { id: 'half', name: 'Moitié', desc: 'Compte les cases occupées dans une moitié de la grille adverse (haut, bas, gauche ou droite).', target: 'opp', param: 'half' },
+  { id: 'ring', name: 'Périmètre', desc: 'Compte les cases occupées sur le contour de la grille adverse (les 36 cases du bord).', target: 'opp', param: 'none' },
+  { id: 'center', name: 'Centre', desc: 'Compte les cases occupées dans le carré central 4 × 4 de la grille adverse.', target: 'opp', param: 'none' },
   { id: 'colorscan', name: 'Détecteur', desc: 'Choisis une couleur : tu apprends combien de cases elle occupe encore chez l’adversaire.', target: 'opp', param: 'color' },
   { id: 'double', name: 'Double tir', desc: 'Tire par deux bords différents en un seul tour.', target: 'opp', param: 'edge2' },
-  { id: 'salve', name: 'Salve', desc: 'Tire par trois bords voisins en un seul tour.', target: 'opp', param: 'salve' },
-  { id: 'shuffle', name: 'Tempête', desc: 'Mélange toute la grille adverse : ses pièces sont replacées au hasard. Ses notes deviennent fausses… mais les tiennes aussi.', target: 'opp', param: 'none' },
-  { id: 'addpiece', name: 'Intrus', desc: 'Ajoute à l’adversaire une pièce au hasard (parmi celles du jeu), posée au hasard. Il la voit apparaître dans son carnet, et toi dans le tien.', target: 'opp', param: 'none' },
+  { id: 'salve', name: 'Salve', desc: 'Tire par trois bords voisins en un seul tour.', target: 'opp', param: 'run', count: 3 },
+  { id: 'rafale', name: 'Rafale', desc: 'Tire par cinq bords voisins en un seul tour.', target: 'opp', param: 'run', count: 5 },
+  { id: 'spy', name: 'Espion', desc: 'Tu apprends combien de sorts l’adversaire a en réserve.', target: 'opp', param: 'none' },
   { id: 'steal', name: 'Vol de sort', desc: 'Prend un sort au hasard dans la réserve de l’adversaire.', target: 'opp', param: 'none' },
+  { id: 'sabotage', name: 'Sabotage', desc: 'Détruit un sort au hasard dans la réserve de l’adversaire.', target: 'opp', param: 'none' },
   { id: 'silence', name: 'Silence', desc: 'L’adversaire ne pourra pas lancer de sort à son prochain tour.', target: 'opp', param: 'none' },
-  { id: 'freeze', name: 'Gel', desc: 'L’adversaire saute son prochain tour : tu joues deux fois de suite.', target: 'opp', param: 'none' },
-  { id: 'revive', name: 'Résurrection', desc: 'Ressuscite une de tes pièces coulées, au hasard. L’adversaire ne le voit pas : elle reste « coulée » dans son carnet.', target: 'self', param: 'none' },
-  { id: 'fog', name: 'Brume', desc: 'Le prochain tir reçu ne révélera aucune couleur.', target: 'self', param: 'none' },
-  { id: 'decoy', name: 'Leurre', desc: 'Le prochain tir reçu annoncera une fausse couleur en plus des vraies.', target: 'self', param: 'none' },
+  { id: 'freeze', name: 'Gel', desc: 'Ne prend pas ton tour : tu joues ensuite deux tours de suite avant que l’adversaire reprenne la main.', target: 'opp', param: 'none' },
+  { id: 'addpiece', name: 'Renfort', desc: 'Ajoute une pièce de ton choix à TA grille, où tu veux : l’adversaire a une pièce de plus à trouver. Il la voit apparaître dans son carnet, mais pas où elle est.', target: 'opp', param: 'piece' },
+  { id: 'shuffle', name: 'Tempête', desc: 'Mélange toute TA grille au hasard : les notes de l’adversaire deviennent fausses. Il n’est pas prévenu.', target: 'self', param: 'none' },
   { id: 'relocate', name: 'Déménagement', desc: 'Déplace une de tes pièces à flot au hasard sur un nouvel emplacement libre, sans que l’adversaire le sache.', target: 'self', param: 'none' },
+  { id: 'pivot', name: 'Pivot', desc: 'Fait pivoter une de tes pièces à flot sur place, sans que l’adversaire le sache.', target: 'self', param: 'none' },
+  { id: 'revive', name: 'Résurrection', desc: 'Ressuscite une de tes pièces coulées, au hasard. L’adversaire voit laquelle revient en jeu (elle n’est plus « coulée » dans son carnet) et peut la couler de nouveau. Elle revient à sa place, ou ailleurs en secret si une autre pièce l’occupe maintenant.', target: 'opp', param: 'revived' },
+  { id: 'fog', name: 'Brume', desc: 'Le prochain tir reçu ne révèle aucune couleur.', target: 'self', param: 'none' },
+  { id: 'decoy', name: 'Leurre', desc: 'Le prochain tir reçu annoncera une fausse couleur en plus des vraies.', target: 'self', param: 'none' },
+  { id: 'mirage', name: 'Mirage', desc: 'Le prochain tir reçu traverse ta grille comme si elle était vide.', target: 'self', param: 'none' },
+  { id: 'camouflage', name: 'Camouflage', desc: 'La prochaine déclaration de l’adversaire sera refusée, même si elle est juste : il perd son tour.', target: 'self', param: 'none' },
   { id: 'draw', name: 'Pioche', desc: 'Pioche tout de suite deux nouveaux sorts au hasard.', target: 'self', param: 'none' },
 ];
 
@@ -161,4 +173,40 @@ export function randomSpot(others: readonly Placement[], cat: Catalog, pieceId: 
     if (validatePlacement([...others, cand], cat, { rules }).length === 0) return cand;
   }
   return null;
+}
+
+export function ringCells(): Cell[] {
+  const out: Cell[] = [];
+  for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) if (r === 0 || c === 0 || r === GRID_SIZE - 1 || c === GRID_SIZE - 1) out.push({ r, c });
+  return out;
+}
+
+export function centerCells(): Cell[] {
+  const out: Cell[] = [];
+  const lo = Math.floor((GRID_SIZE - 4) / 2);
+  for (let r = lo; r < lo + 4; r++) for (let c = lo; c < lo + 4; c++) out.push({ r, c });
+  return out;
+}
+
+/** Bloc de 2 × 2 dont le coin haut-gauche est ramené dans la grille. */
+export function blockCells(r: number, c: number): Cell[] {
+  const r0 = Math.min(r, GRID_SIZE - 2);
+  const c0 = Math.min(c, GRID_SIZE - 2);
+  return [
+    { r: r0, c: c0 },
+    { r: r0, c: c0 + 1 },
+    { r: r0 + 1, c: c0 },
+    { r: r0 + 1, c: c0 + 1 },
+  ];
+}
+
+/** Rotations possibles d'une pièce posée, sur place (même coin haut-gauche). */
+export function pivotSpot(others: readonly Placement[], cat: Catalog, current: Placement, random: () => number = Math.random): Placement | null {
+  const def = pieceDef(current.pieceId, cat);
+  const shape = def && cat.shapes[def.shape];
+  if (!shape) return null;
+  const rots = rotationCount(shape.parts);
+  const options = ([0, 1, 2, 3] as const).filter((rot) => rot < rots && rot !== current.rot).map((rot) => ({ ...current, rot }));
+  const valid = options.filter((cand) => validatePlacement([...others, cand], cat).length === 0);
+  return valid.length ? valid[Math.floor(random() * valid.length)] : null;
 }

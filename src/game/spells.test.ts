@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLASSIC_SET } from '../config/pieces';
-import { catalogOf, randomPlacement, seededRandom, validatePlacement, DEFAULT_SPELL_CONFIG } from '../engine';
+import { catalogOf, placementParts, randomPlacement, seededRandom, validatePlacement, DEFAULT_SPELL_CONFIG } from '../engine';
 import { PlayerSession, freshState, newGameId } from './session';
 import { createLocalPair } from './transport';
 import { isValidAction, isValidResult, parseMessage } from './protocol';
@@ -11,8 +11,15 @@ const flush = async () => {
 const cat = catalogOf(CLASSIC_SET);
 const cfg = { ...DEFAULT_SPELL_CONFIG, enabled: true, everyTurns: 1 };
 
+/** Le premier tirage (qui commence) donne l'hôte, les suivants sont variés. */
+function hostRandom() {
+  const rng = seededRandom(11);
+  let first = true;
+  return () => (first ? ((first = false), 0.1) : rng());
+}
+
 async function game() {
-  const host = new PlayerSession(freshState('online', 0, 'A', newGameId(), CLASSIC_SET, cfg), null, '', () => 0.1);
+  const host = new PlayerSession(freshState('online', 0, 'A', newGameId(), CLASSIC_SET, cfg), null, '', hostRandom());
   const guest = new PlayerSession(freshState('online', 1, 'B', '', null), null, '', seededRandom(7));
   const [ta, tb] = createLocalPair();
   host.attach(ta);
@@ -53,36 +60,146 @@ describe('sorts', () => {
     expect(host.cast('radar', { axis: 'row', index: 0 })).toBe(false);
   });
 
-  it('Gel : le lanceur rejoue', async () => {
-    const { host } = await game();
+  it('Gel : ne prend pas le tour, le lanceur joue deux fois de suite', async () => {
+    const { host, guest } = await game();
     host.state.spells.push('freeze');
     host.cast('freeze');
     await flush();
     expect(host.attackerOf(1)).toBe(0);
+    host.shoot({ side: 'top', index: 0 });
+    await flush();
+    expect(host.attackerOf(2)).toBe(0);
+    host.shoot({ side: 'top', index: 1 });
+    await flush();
+    expect(host.attackerOf(3)).toBe(1);
+    expect(guest.isMyTurn).toBe(true);
   });
 
-  it('Intrus : une pièce de plus chez l’adversaire, visible des deux côtés', async () => {
+  it('Renfort : le lanceur ajoute une pièce à SA grille, où il veut ; l’adversaire la voit dans son carnet', async () => {
     const { host, guest } = await game();
+    const pick = cat.pieces[0];
     host.state.spells.push('addpiece');
-    host.cast('addpiece');
+    // un emplacement libre choisi par le lanceur
+    const spotOk = (r: number, c: number) => validatePlacement([...host.state.placement, { pieceId: 'x0.' + pick.shape + '.' + pick.color, r, c, rot: 0 }], { ...cat, pieces: [...cat.pieces, { id: 'x0.' + pick.shape + '.' + pick.color, shape: pick.shape, color: pick.color }] }).length === 0;
+    let spot: { r: number; c: number } | null = null;
+    for (let r = 0; r < 10 && !spot; r++) for (let c = 0; c < 10 && !spot; c++) if (spotOk(r, c)) spot = { r, c };
+    expect(spot).not.toBeNull();
+    // emplacement invalide refusé (sort conservé)
+    expect(host.cast('addpiece', { shape: pick.shape, color: pick.color }, { r: 50, c: 50, rot: 0 })).toBe(false);
+    expect(host.state.spells).toContain('addpiece');
+    expect(host.cast('addpiece', { shape: pick.shape, color: pick.color }, { ...spot!, rot: 0 })).toBe(true);
     await flush();
-    const r = host.state.log[0].result;
-    expect(r.kind === 'spell' && r.piece).toBeTruthy();
-    expect(guest.myPieces.length).toBe(cat.pieces.length + 1);
-    expect(host.oppPieces.length).toBe(cat.pieces.length + 1);
-    expect(host.myPieces.length).toBe(cat.pieces.length);
-    expect(guest.state.placement.length).toBe(cat.pieces.length + 1);
-    expect(validatePlacement(guest.state.placement, guest.catalog!).length).toBe(0);
+    expect(host.myPieces.length).toBe(cat.pieces.length + 1);
+    expect(host.state.placement.length).toBe(cat.pieces.length + 1);
+    expect(guest.oppPieces.length).toBe(cat.pieces.length + 1);
+    expect(guest.myPieces.length).toBe(cat.pieces.length);
+    expect(guest.state.placement.length).toBe(cat.pieces.length);
   });
 
-  it('Tempête : la grille adverse change', async () => {
+  it('Tempête : mélange MA grille, sans prévenir l’adversaire', async () => {
     const { host, guest } = await game();
-    const before = JSON.stringify(guest.state.placement);
+    const before = JSON.stringify(host.state.placement);
+    const oppBefore = JSON.stringify(guest.state.placement);
     host.state.spells.push('shuffle');
-    host.cast('shuffle');
+    expect(host.cast('shuffle')).toBe(true);
     await flush();
-    expect(JSON.stringify(guest.state.placement)).not.toBe(before);
-    expect(validatePlacement(guest.state.placement, guest.catalog!, { requireAll: true }).length).toBe(0);
+    expect(JSON.stringify(host.state.placement)).not.toBe(before);
+    expect(JSON.stringify(guest.state.placement)).toBe(oppBefore);
+    expect(guest.state.log[0].action).toEqual({ kind: 'spell', spell: 'self' });
+    expect(validatePlacement(host.state.placement, host.catalog!, { requireAll: true }).length).toBe(0);
+  });
+
+  it('Salve, Rafale et Double tir fonctionnent', async () => {
+    for (const [id, edges] of [
+      ['salve', [0, 1, 2].map((index) => ({ side: 'top' as const, index }))],
+      ['rafale', [3, 4, 5, 6, 7].map((index) => ({ side: 'left' as const, index }))],
+      ['double', [{ side: 'top' as const, index: 0 }, { side: 'bottom' as const, index: 4 }]],
+    ] as const) {
+      const { host, guest } = await game();
+      host.state.spells.push(id);
+      expect(host.cast(id, { edges: [...edges] })).toBe(true);
+      await flush();
+      const r = host.state.log[0].result;
+      expect(r.kind === 'spell' && r.shots?.length).toBe(edges.length);
+      expect(guest.state.log[0].secret?.paths?.length).toBe(edges.length);
+    }
+    const { host } = await game();
+    host.state.spells.push('salve');
+    expect(host.cast('salve', { edges: [{ side: 'top', index: 0 }, { side: 'top', index: 2 }, { side: 'top', index: 3 }] })).toBe(false);
+  });
+
+  it('nouveaux sorts d’information : Loupe, Histogramme, Périmètre, Centre, Espion', async () => {
+    const { host, guest } = await game();
+    guest.state.spells.push('fog', 'decoy');
+    for (const [id, params] of [
+      ['loupe', { r: 9, c: 9 }],
+      ['histo', { opt: 'row' }],
+      ['ring', {}],
+      ['center', {}],
+      ['spy', {}],
+    ] as const) {
+      host.state.spells.push(id);
+      expect(host.cast(id, params)).toBe(true);
+      await flush();
+      guest.shoot({ side: 'top', index: 0 });
+      await flush();
+    }
+    const results = host.state.log.filter((e) => e.by === 0).map((e) => e.result);
+    const loupe = results[0];
+    expect(loupe.kind === 'spell' && loupe.cells?.length).toBe(4);
+    const histo = results[1];
+    expect(histo.kind === 'spell' && histo.counts?.reduce((a, b) => a + b, 0)).toBe(cat.pieces.reduce((n, p) => n + catalogOf(CLASSIC_SET).shapes[p.shape].parts.length, 0));
+    const spy = results[4];
+    expect(spy.kind === 'spell' && spy.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Sabotage détruit un sort adverse sans le donner', async () => {
+    const { host, guest } = await game();
+    guest.state.spells.push('fog');
+    host.state.spells.push('sabotage');
+    host.cast('sabotage');
+    await flush();
+    expect(guest.state.spells).not.toContain('fog');
+    expect(host.state.spells).not.toContain('fog');
+  });
+
+  it('Mirage : le prochain tir traverse la grille sans rien toucher', async () => {
+    const { host, guest } = await game();
+    guest.state.spells.push('mirage');
+    host.shoot({ side: 'top', index: 0 });
+    await flush();
+    guest.cast('mirage');
+    await flush();
+    host.shoot({ side: 'left', index: 4 });
+    await flush();
+    const last = host.state.log[host.state.log.length - 1].result;
+    expect(last.kind === 'shot' && last.colors).toEqual([]);
+    expect(last.kind === 'shot' && last.exit).toEqual({ side: 'right', index: 4 });
+  });
+
+  it('Camouflage : la prochaine déclaration, même juste, est refusée', async () => {
+    const { host, guest } = await game();
+    host.shoot({ side: 'top', index: 0 });
+    await flush();
+    guest.state.spells.push('camouflage');
+    guest.cast('camouflage');
+    await flush();
+    const p = guest.state.placement[0];
+    const def = cat.pieces.find((d) => d.id === p.pieceId)!;
+    host.claim({ color: def.color, shape: def.shape, cells: placementParts(p, cat) });
+    await flush();
+    const r = host.state.log[host.state.log.length - 1].result;
+    expect(r.kind === 'claim' && r.ok).toBe(false);
+    expect(guest.mySunk.size).toBe(0);
+  });
+
+  it('Pivot garde un placement valide', async () => {
+    const { host } = await game();
+    const before = JSON.stringify(host.state.placement);
+    host.state.spells.push('pivot');
+    const ok = host.cast('pivot');
+    if (ok) expect(JSON.stringify(host.state.placement)).not.toBe(before);
+    expect(validatePlacement(host.state.placement, host.catalog!, { requireAll: true }).length).toBe(0);
   });
 
   it('un sort secret n’apprend rien à l’adversaire', async () => {
@@ -93,6 +210,52 @@ describe('sorts', () => {
     expect(guest.state.log[0].action).toEqual({ kind: 'spell', spell: 'self' });
     expect(host.state.selfLog['0']).toBe('relocate');
     expect(validatePlacement(host.state.placement, host.catalog!, { requireAll: true }).length).toBe(0);
+  });
+
+  it('Résurrection publique : l’adversaire voit la pièce revenir et peut la recouler', async () => {
+    const { host, guest } = await game();
+    const p = guest.state.placement[0];
+    const def = cat.pieces.find((d) => d.id === p.pieceId)!;
+    const claim = { color: def.color, shape: def.shape, cells: placementParts(p, cat) };
+    host.claim(claim);
+    await flush();
+    expect(guest.mySunk.has(p.pieceId)).toBe(true);
+    expect(host.oppSunk.length).toBe(1);
+    guest.state.spells.push('revive');
+    expect(guest.cast('revive')).toBe(true);
+    await flush();
+    expect(guest.mySunk.has(p.pieceId)).toBe(false);
+    expect(host.oppSunk.length).toBe(0); // plus coulée dans le carnet de l'adversaire
+    expect(host.state.log[host.state.log.length - 1].action.kind).toBe('spell');
+    host.claim(claim);
+    await flush();
+    const r = host.state.log[host.state.log.length - 1].result;
+    expect(r.kind === 'claim' && r.ok).toBe(true);
+    expect(host.oppSunk.length).toBe(1);
+  });
+
+  it('on peut poser sur une pièce coulée, et la ressuscitée ne chevauche jamais une pièce à flot', async () => {
+    const { host, guest } = await game();
+    const dead = guest.state.placement[0];
+    const def = cat.pieces.find((d) => d.id === dead.pieceId)!;
+    host.claim({ color: def.color, shape: def.shape, cells: placementParts(dead, cat) });
+    await flush();
+    expect(guest.mySunk.has(dead.pieceId)).toBe(true);
+    // Tempête : les pièces à flot peuvent maintenant occuper la place de la pièce coulée
+    for (let i = 0; i < 6; i++) {
+      guest.state.spells.push('shuffle');
+      guest.cast('shuffle');
+      await flush();
+      host.shoot({ side: 'top', index: 0 });
+      await flush();
+    }
+    // la pièce coulée n'a pas bougé
+    expect(JSON.stringify(guest.state.placement.find((p) => p.pieceId === dead.pieceId))).toBe(JSON.stringify(dead));
+    guest.state.spells.push('revive');
+    expect(guest.cast('revive')).toBe(true);
+    await flush();
+    expect(guest.mySunk.has(dead.pieceId)).toBe(false);
+    expect(validatePlacement(guest.state.placement, guest.catalog!, { requireAll: true }).length).toBe(0);
   });
 
   it('Résurrection impossible sans pièce coulée', async () => {
@@ -137,6 +300,8 @@ describe('sorts', () => {
     expect(isValidResult({ kind: 'spell', spell: 'radar', count: 3 })).toBe(true);
     expect(isValidResult({ kind: 'spell', spell: 'radar', count: -1 })).toBe(false);
     expect(isValidResult({ kind: 'spell', spell: 'addpiece', piece: { id: 'ok', shape: 's', color: 'red' } })).toBe(false);
+    expect(isValidAction({ kind: 'spell', spell: 'salve', edges: [0, 1, 2].map((index) => ({ side: 'top', index })) })).toBe(true);
+    expect(isValidAction({ kind: 'spell', spell: 'rafale', edges: [0, 1, 2].map((index) => ({ side: 'top', index })) })).toBe(false);
     expect(parseMessage({ t: 'newgame', gameId: 'g', set: null, cfg: { enabled: 'oui' } })).toBeNull();
   });
 });

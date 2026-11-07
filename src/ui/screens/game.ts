@@ -32,6 +32,7 @@ import { createPieceEditor, pieceName } from '../pieceEditor';
 import { setDetails } from './settings';
 import { spellsTab } from './spells';
 import { describeSpell } from '../spellText';
+import { activeEffects, spellOverlays } from '../spellVisual';
 import type { App, GameCtx } from '../app';
 
 // ---------- textes ----------
@@ -435,6 +436,7 @@ function shootTab(app: App, ctx: GameCtx, session: PlayerSession): HTMLElement {
   const sunk = sunkAsPlacements(session.oppSunk, cat);
   const guesses: BoardPiece[] = st.notes.guesses.filter((g) => !sunk.ids.has(g.pieceId)).map((g) => ({ ...g, style: 'guess' }));
   const selected = canAct ? app.ui.selectedEdge : null;
+  const lastMineEntry = [...st.log].reverse().find((e) => e.by === st.me);
 
   const fire = () => {
     if (selected && session.shoot(selected)) app.setUi({ selectedEdge: null });
@@ -449,6 +451,7 @@ function shootTab(app: App, ctx: GameCtx, session: PlayerSession): HTMLElement {
     marks: st.notes.marks,
     edgeShades: shotShades(session),
     selectedEdge: selected,
+    overlays: lastMineEntry?.action.kind === 'spell' ? spellOverlays(lastMineEntry, st.selfLog[String(lastMineEntry.n)]) : [],
   });
   board.svg.setAttribute('tabindex', '0');
   board.svg.addEventListener('click', (e) => {
@@ -733,9 +736,11 @@ function boardTab(app: App, session: PlayerSession): HTMLElement {
     pieces,
     paths,
     edgeShades: shades,
+    overlays: viewed ? spellOverlays(viewed) : [],
     marks: Object.fromEntries(claimCells.map((c) => [cellKey(c), '?' as NoteMark])),
   });
 
+  const effects = activeEffects(session);
   const remaining = st.placement.length - st.placement.filter((p) => sunk.has(p.pieceId)).length;
   return h(
     'div',
@@ -744,6 +749,7 @@ function boardTab(app: App, session: PlayerSession): HTMLElement {
     viewed
       ? h('div', { class: 'card card-result' }, h('div', { class: 'card-label' }, `Coup reçu n°${received.indexOf(viewed) + 1}`), turnSummary(viewed, cat, session))
       : h('p', { class: 'muted small' }, 'Tu n’as encore reçu aucun tir.'),
+    effects.length ? h('div', { class: 'effects' }, ...effects.map((x) => h('div', { class: 'effect-chip' }, x))) : null,
     board.root,
     received.length
       ? h(
