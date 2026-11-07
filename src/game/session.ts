@@ -57,6 +57,7 @@ import {
   appFingerprint,
   parseMessage,
   type Action,
+  type Activity,
   type Message,
   type PlayerIndex,
   type PublicTurn,
@@ -194,6 +195,9 @@ export class PlayerSession {
   private changeListeners = new Set<() => void>();
   private eventListeners = new Set<(e: SessionEvent) => void>();
   private catalogCache: { hash: string; catalog: Catalog } | null = null;
+  /** Ce que fait l'adversaire (éphémère, non sauvegardé). */
+  oppActivity: Activity | null = null;
+  private myActivity: Activity | null = null;
 
   constructor(
     state: PlayerState,
@@ -268,7 +272,10 @@ export class PlayerSession {
     this.transport = transport;
     transport.onMessage = (raw) => this.receive(raw);
     transport.onStatus = (up) => {
-      if (up) this.sendSync();
+      if (up) {
+        this.sendSync();
+        if (this.myActivity) this.send({ t: 'activity', a: this.myActivity });
+      } else this.oppActivity = null;
       this.changed();
     };
     if (transport.connected) this.sendSync();
@@ -307,6 +314,13 @@ export class PlayerSession {
       cfg: s.me === 0 ? s.spellCfg : null,
     };
     this.send(msg);
+  }
+
+  /** Indique à l'adversaire ce que je fais (onglet, visée, sort en préparation). */
+  setActivity(a: Activity | null): void {
+    if (a === this.myActivity) return;
+    this.myActivity = a;
+    if (a) this.send({ t: 'activity', a });
   }
 
   // ---------- état dérivé ----------
@@ -546,6 +560,10 @@ export class PlayerSession {
     switch (msg.t) {
       case 'sync':
         this.onSync(msg);
+        return;
+      case 'activity':
+        this.oppActivity = msg.a;
+        for (const fn of this.changeListeners) fn(); // simple rafraîchissement, rien à sauvegarder
         return;
       case 'ready':
         this.state.oppReady = true;

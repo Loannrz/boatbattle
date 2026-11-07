@@ -216,6 +216,17 @@ async function askParams(def: SpellDef, session: PlayerSession): Promise<Partial
 // ---------- onglet ----------
 
 async function play(app: App, session: PlayerSession, def: SpellDef): Promise<void> {
+  app.ui.picking = true;
+  session.setActivity('spell-pick');
+  try {
+    await playInner(app, session, def);
+  } finally {
+    app.ui.picking = false;
+    app.render();
+  }
+}
+
+async function playInner(app: App, session: PlayerSession, def: SpellDef): Promise<void> {
   const why = session.spellBlocked(def.id);
   if (why) {
     toast(why, 'warn', 2500);

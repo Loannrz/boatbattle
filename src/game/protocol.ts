@@ -68,6 +68,10 @@ export interface SpellResult {
   gameOver?: boolean;
 }
 
+/** Ce que fait l'autre joueur en ce moment (information éphémère, jamais sauvegardée). */
+export type Activity = 'shoot' | 'aim' | 'notes' | 'spells' | 'spell-pick' | 'board';
+export const ACTIVITIES: readonly string[] = ['shoot', 'aim', 'notes', 'spells', 'spell-pick', 'board'];
+
 export type Action = { kind: 'shot'; edge: Edge } | { kind: 'claim'; claim: Claim } | SpellAction;
 
 export type Result =
@@ -107,6 +111,7 @@ export interface SyncMessage {
 export type Message =
   | SyncMessage
   | { t: 'ready' }
+  | { t: 'activity'; a: Activity }
   | { t: 'start'; firstPlayer: PlayerIndex }
   | { t: 'action'; n: number; action: Action }
   | { t: 'result'; n: number; result: Result }
@@ -239,6 +244,8 @@ export function parseMessage(raw: unknown): Message | null {
   switch (m.t) {
     case 'ready':
       return { t: 'ready' };
+    case 'activity':
+      return typeof m.a === 'string' && ACTIVITIES.includes(m.a) ? { t: 'activity', a: m.a as Activity } : null;
     case 'start':
       return isPlayer(m.firstPlayer) ? { t: 'start', firstPlayer: m.firstPlayer } : null;
     case 'newgame':

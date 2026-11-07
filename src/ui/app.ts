@@ -7,6 +7,7 @@ import { driveBot } from '../game/bot';
 import type { PlayerIndex } from '../game/protocol';
 import { COLORS } from '../config/pieces';
 import { RULES } from '../config/rules';
+import type { Activity } from '../game/protocol';
 import { PlayerSession, freshState, newGameId, type Mode, type SessionEvent, type TurnEntry } from '../game/session';
 import { createLocalPair } from '../game/transport';
 import type { PeerLink } from '../net/peer';
@@ -30,6 +31,8 @@ export interface UiState {
   selectedPiece: string | null;
   viewTurn: number | null;
   unseenIncoming: boolean;
+  /** Une fenêtre de choix de sort est ouverte. */
+  picking?: boolean;
 }
 
 export interface GameCtx {
@@ -110,6 +113,7 @@ export class App {
         else if (phase === 'waiting') el = renderWaiting(this, ctx, session);
         else if (phase === 'over') el = renderOver(this, ctx, session);
         else el = renderPlaying(this, ctx, session);
+        session.setActivity(phase === 'playing' ? this.currentActivity() : null);
       }
     }
     // conserver la position de défilement si on reste sur le même écran
@@ -137,6 +141,21 @@ export class App {
     if (patch.tab === 'board') this.ui.unseenIncoming = false;
     if (patch.tab && patch.tab !== 'board' && patch.viewTurn === undefined) this.ui.viewTurn = null;
     this.render();
+  }
+
+  /** Ce que je fais en ce moment, pour l'afficher chez l'adversaire. */
+  private currentActivity(): Activity {
+    if (this.ui.picking) return 'spell-pick';
+    switch (this.ui.tab) {
+      case 'notes':
+        return 'notes';
+      case 'spells':
+        return 'spells';
+      case 'board':
+        return 'board';
+      default:
+        return this.ui.selectedEdge ? 'aim' : 'shoot';
+    }
   }
 
   setDragging(active: boolean): void {

@@ -199,6 +199,44 @@ export function topBar(app: App, ctx: GameCtx, session: PlayerSession): HTMLElem
   );
 }
 
+/** Bandeau fixe (hors défilement) : à qui de jouer, visible depuis tous les onglets. */
+const ACTIVITY_TEXT: Record<string, { ic: string; text: string }> = {
+  shoot: { ic: ICONS.laser, text: 'étudie la grille adverse' },
+  aim: { ic: ICONS.laser, text: 'règle son tir' },
+  notes: { ic: ICONS.notes, text: 'consulte son carnet' },
+  spells: { ic: ICONS.wand, text: 'feuillette ses sorts' },
+  'spell-pick': { ic: ICONS.wand, text: 'prépare un sort' },
+  board: { ic: ICONS.board, text: 'inspecte son plateau' },
+};
+
+function turnBanner(ctx: GameCtx, session: PlayerSession): HTMLElement {
+  const wrap = h('div', { class: 'turn-wrap' }, turnBannerText(session));
+  const act = ctx.mode === 'online' && session.connected && session.oppActivity ? ACTIVITY_TEXT[session.oppActivity] : undefined;
+  if (act) {
+    wrap.append(
+      h(
+        'div',
+        { class: `activity act-${session.oppActivity}`, role: 'status', 'aria-live': 'polite' },
+        h('span', { class: 'act-icon' }, icon(act.ic)),
+        h('span', { class: 'act-text' }, `${session.state.oppName || 'L’adversaire'} ${act.text}`),
+        h('span', { class: 'dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')),
+      ),
+    );
+  }
+  return wrap;
+}
+
+function turnBannerText(session: PlayerSession): HTMLElement {
+  const st = session.state;
+  const mine = session.isMyTurn && !st.pending;
+  const holder = session.attackerOf(st.log.length) === st.me ? st.myName || 'toi' : st.oppName || 'l’adversaire';
+  let text: string;
+  if (st.pending) text = 'Coup envoyé, en attente du résultat…';
+  else if (mine) text = 'À toi de jouer !';
+  else text = `Tour de ${holder}`;
+  return h('div', { class: `turn-banner${mine ? ' mine' : ''}`, role: 'status', 'aria-live': 'polite' }, text);
+}
+
 export function offlineBanner(_app: App, ctx: GameCtx, session: PlayerSession): HTMLElement | null {
   if (ctx.mode !== 'online' || session.connected) return null;
   return h('div', { class: 'banner banner-warn', role: 'alert' }, h('span', null, 'Connexion perdue avec l’autre téléphone.'), h('button', { class: 'btn btn-sm btn-primary', onclick: () => _app.reconnect() }, 'Reconnecter'));
@@ -417,6 +455,7 @@ export function renderPlaying(app: App, ctx: GameCtx, session: PlayerSession): H
     'div',
     { class: 'screen game' },
     topBar(app, ctx, session),
+    turnBanner(ctx, session),
     offlineBanner(app, ctx, session),
     h('main', { class: 'scroll', id: 'game-scroll' }, content),
     h(

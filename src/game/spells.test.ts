@@ -305,6 +305,20 @@ describe('sorts', () => {
     }
   });
 
+  it('activité de l’adversaire : transmise, validée, effacée à la déconnexion', async () => {
+    const { host, guest } = await game();
+    guest.setActivity('notes');
+    await flush();
+    expect(host.oppActivity).toBe('notes');
+    guest.setActivity('spell-pick');
+    await flush();
+    expect(host.oppActivity).toBe('spell-pick');
+    expect(parseMessage({ t: 'activity', a: 'hack' })).toBeNull();
+    expect(parseMessage({ t: 'activity', a: 'board' })).toEqual({ t: 'activity', a: 'board' });
+    host.detach();
+    host.attach(createLocalPair()[0]);
+  });
+
   it('validation des messages de sort', () => {
     expect(isValidAction({ kind: 'spell', spell: 'radar', axis: 'row', index: 3 })).toBe(true);
     expect(isValidAction({ kind: 'spell', spell: 'radar' })).toBe(false);
