@@ -80,12 +80,12 @@ describe('ordre des tours', () => {
   const good = { action: { kind: 'claim' }, result: { kind: 'claim', ok: true } };
   const bad = { action: { kind: 'claim' }, result: { kind: 'claim', ok: false } };
   it('par défaut, tout coup fait passer la main (déclaration juste comprise)', () => {
-    const log = [{ by: 0 as const, ...shot }, { by: 1 as const, ...good }, { by: 0 as const, ...bad }];
+    const log = [{ by: 0 as const, target: 1 as const, ...shot }, { by: 1 as const, target: 0 as const, ...good }, { by: 0 as const, target: 1 as const, ...bad }];
     expect([0, 1, 2, 3].map((n) => attackerAt(0, log, n))).toEqual([0, 1, 0, 1]);
   });
   it('règle "rejouer après une déclaration juste"', () => {
     const rules = { ...RULES, correctClaimPassesTurn: false };
-    const log = [{ by: 0 as const, ...good }, { by: 0 as const, ...bad }, { by: 1 as const, ...shot }];
+    const log = [{ by: 0 as const, target: 1 as const, ...good }, { by: 0 as const, target: 1 as const, ...bad }, { by: 1 as const, target: 0 as const, ...shot }];
     expect([0, 1, 2, 3].map((n) => attackerAt(0, log, n, rules))).toEqual([0, 0, 1, 0]);
   });
 });

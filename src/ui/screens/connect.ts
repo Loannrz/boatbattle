@@ -1,5 +1,6 @@
 /**
- * Écran de connexion entre deux téléphones (échange manuel de codes).
+ * Écran de connexion entre deux téléphones (échange manuel de codes), un lien à la fois :
+ * l'hôte crée un code d'invitation par invité (jusqu'à 3), l'invité lit le code de l'hôte.
  * Ce module gère son propre affichage (pas de re-rendu global pendant la saisie).
  */
 
@@ -15,8 +16,9 @@ export type ConnectRole = 'host' | 'guest';
 
 export interface ConnectOptions {
   session: PlayerSession;
+  /** L'hôte (joueur 0) crée toujours le code ; un invité le lit. */
   role: ConnectRole;
-  /** Reconnexion d'une partie en cours (le rôle peut être changé). */
+  /** Reconnexion d'une partie en cours. */
   reconnect: boolean;
   prefill?: string;
 }
@@ -68,7 +70,7 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
   let busy = false;
   let timeout: number | undefined;
   let disposed = false;
-  let role: ConnectRole = opts.role;
+  const role: ConnectRole = opts.role;
 
   const body = h('div', { class: 'connect-body' });
   const status = h('div', { class: 'connect-status', role: 'status', 'aria-live': 'polite' });
@@ -94,13 +96,12 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
   const newLink = () => {
     if (link && !link.connected) link.close();
     link = new PeerLink();
-    opts.session.attach(link);
+    app.prepareLink(opts.session, link);
     link.onState = (st) => {
       if (disposed) return;
       if (st === 'open') {
         if (timeout) clearTimeout(timeout);
-        setStatus('Connecté !', 'ok');
-        app.onConnected(opts.session, link!);
+        setStatus(role === 'host' ? 'Connecté ! Le joueur rejoint le salon…' : 'Connecté ! En attente de l’accueil par l’hôte…', 'busy');
       } else if (st === 'failed') {
         setStatus('La connexion a échoué. Vérifiez que les deux téléphones ont internet, puis recommencez.', 'error');
       } else if (st === 'connecting') {
@@ -232,7 +233,7 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
 
   // ---------- hôte ----------
   const runHost = async () => {
-    body.replaceChildren(step(1, 'Envoie l’invitation', h('p', { class: 'muted' }, 'Préparation du code…')));
+    body.replaceChildren(step(1, opts.reconnect ? 'Code de reconnexion' : 'Envoie l’invitation', h('p', { class: 'muted' }, 'Préparation du code…')));
     setStatus('Recherche des adresses réseau…', 'busy');
     const l = newLink();
     let code: string;
@@ -247,14 +248,14 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
     body.replaceChildren(
       step(
         1,
-        'Envoie l’invitation',
-        h('p', { class: 'muted' }, 'Fais scanner ce QR par l’autre téléphone avec le bouton « Scanner » de Boatbattle, ou partage le lien par message. (Avec l’appareil photo de l’iPhone, le lien s’ouvre dans Safari et non dans l’app installée.)'),
+        opts.reconnect ? 'Code de reconnexion' : 'Envoie l’invitation',
+        h('p', { class: 'muted' }, opts.reconnect ? 'Ce code sert à UN joueur de la partie qui a perdu la connexion : fais-le lui scanner (bouton « Scanner » de Boatbattle) ou envoie-le lui.' : 'Ce code est pour UN joueur. Fais-le scanner par son téléphone avec le bouton « Scanner » de Boatbattle, ou partage le lien par message. Pour inviter un autre joueur, tu referas un code depuis le salon. (Avec l’appareil photo de l’iPhone, le lien s’ouvre dans Safari et non dans l’app installée.)'),
         codeOutput(url, `Partie Boatbattle ! Ouvre ce lien ou colle ce code dans l’app :\n${url}`, code),
       ),
       step(
         2,
         'Récupère sa réponse',
-        h('p', { class: 'muted' }, 'L’autre téléphone affiche alors un code de réponse : scanne-le ou colle-le ici.'),
+        h('p', { class: 'muted' }, 'Son téléphone affiche alors un code de réponse : scanne-le ou colle-le ici.'),
         codeInput('Code de réponse', async (text) => {
           if (busy || l.state !== 'waiting-answer') {
             toast('Réponse déjà prise en compte : connexion en cours…', 'info', 2500);
@@ -274,7 +275,7 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
         }),
       ),
     );
-    setStatus('En attente de la réponse de l’autre téléphone.', 'info');
+    setStatus('En attente de la réponse du joueur invité.', 'info');
   };
 
   // ---------- invité ----------
@@ -310,17 +311,17 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
         step(
           2,
           'Renvoie ta réponse',
-          h('p', { class: 'muted' }, 'Montre ce QR à l’autre téléphone, ou envoie-lui le code. La connexion se fera toute seule.'),
+          h('p', { class: 'muted' }, 'Montre ce QR à l’hôte (le téléphone qui a créé la partie), ou envoie-lui le code. La connexion se fera toute seule.'),
           codeOutput(answer, `Réponse Boatbattle :\n${answer}`, answer),
         ),
       );
-      setStatus('En attente de l’autre téléphone…', 'busy');
+      setStatus('En attente de l’hôte…', 'busy');
     };
     body.replaceChildren(
       step(
         1,
         'Lis l’invitation',
-        h('p', { class: 'muted' }, 'Scanne le QR affiché par l’autre téléphone, ou colle le code reçu par message.'),
+        h('p', { class: 'muted' }, 'Scanne le QR affiché par l’hôte (le téléphone qui a créé la partie), ou colle le code reçu par message.'),
         codeInput('Code d’invitation', onInvite, opts.prefill ?? ''),
       ),
     );
@@ -334,29 +335,6 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
     else runGuest();
   };
 
-  const roleSwitch = opts.reconnect
-    ? h(
-        'div',
-        { class: 'segmented', role: 'tablist', 'aria-label': 'Qui crée le code ?' },
-        ...(['host', 'guest'] as const).map((r) =>
-          h(
-            'button',
-            {
-              role: 'tab',
-              class: `seg ${r === role ? 'active' : ''}`,
-              'aria-selected': r === role ? 'true' : 'false',
-              onclick: (e: Event) => {
-                role = r;
-                (e.currentTarget as HTMLElement).parentElement!.querySelectorAll('.seg').forEach((b) => b.classList.toggle('active', b === e.currentTarget));
-                start();
-              },
-            },
-            r === 'host' ? 'Je crée le code' : 'J’ai reçu un code',
-          ),
-        ),
-      )
-    : null;
-
   const el = h(
     'div',
     { class: 'screen connect' },
@@ -364,20 +342,21 @@ export function renderConnect(app: App, opts: ConnectOptions): { el: HTMLElement
       'header',
       { class: 'topbar' },
       h('button', { class: 'icon-btn', 'aria-label': 'Retour', onclick: () => app.leaveConnect() }, icon(ICONS.chevronLeft)),
-      h('h1', null, opts.reconnect ? 'Reconnexion' : role === 'host' ? 'Créer une partie' : 'Rejoindre une partie'),
+      h('h1', null, opts.reconnect ? 'Reconnexion' : role === 'host' ? (opts.session.state.players.length > 1 ? 'Inviter un joueur' : 'Créer une partie') : 'Rejoindre une partie'),
     ),
     h(
       'main',
       { class: 'scroll' },
-      opts.reconnect ? h('p', { class: 'muted' }, 'La partie est sauvegardée sur chaque téléphone. Un des deux crée un code, l’autre le lit : le jeu reprend où il en était.') : null,
-      roleSwitch,
+      opts.reconnect
+        ? h('p', { class: 'muted' }, role === 'host' ? 'La partie est sauvegardée sur chaque téléphone. Tu crées un code, le joueur déconnecté le lit : le jeu reprend où il en était.' : 'La partie est sauvegardée sur chaque téléphone. L’hôte crée un code de reconnexion, tu le lis : le jeu reprend où il en était.')
+        : null,
       status,
       body,
       h(
         'aside',
         { class: 'tips' },
         h('strong', null, 'Conseils'),
-        h('ul', null, h('li', null, 'Restez sur cet écran pendant l’échange des codes.'), h('li', null, 'Sur iPhone, quitter l’app ou verrouiller l’écran peut couper la connexion : la partie reprendra avec « Reconnecter ».'), h('li', null, 'À distance, ça marche dans la plupart des cas ; certains réseaux mobiles ou d’entreprise bloquent les connexions directes.')),
+        h('ul', null, h('li', null, 'Restez sur cet écran pendant l’échange des codes.'), h('li', null, 'Chaque invité se connecte seulement à l’hôte, qui relaie pour les autres : à 3 ou 4, l’hôte doit rester connecté.'), h('li', null, 'Sur iPhone, quitter l’app ou verrouiller l’écran peut couper la connexion : la partie reprendra avec « Reconnecter ».'), h('li', null, 'À distance, ça marche dans la plupart des cas ; certains réseaux mobiles ou d’entreprise bloquent les connexions directes.')),
       ),
     ),
   );

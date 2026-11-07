@@ -13,49 +13,75 @@ import { shapePartsRotated, validatePlacement, type Grid, type Placement } from 
 import { GRID_SIZE, rotationCount, type Cell } from './geometry';
 import { pieceDef, type Catalog } from './pieces';
 
-export type SpellParam = 'none' | 'cell' | 'line' | 'axis' | 'edge2' | 'run' | 'color' | 'half' | 'diag' | 'piece' | 'revived';
+export type SpellParam = 'none' | 'cell' | 'line' | 'axis' | 'edge2' | 'run' | 'color' | 'half' | 'diag' | 'piece' | 'revived' | 'player';
+
+/**
+ * Qui voit quoi quand le sort est lancé :
+ *  - public : tout le monde voit le sort, ses paramètres et son résultat (sorts qui changent
+ *    la grille du lanceur, tirs multiples, sorts qui changent l'ordre des tours) ;
+ *  - private : seuls le lanceur et la cible voient le détail, les autres voient
+ *    « A a lancé un sort sur B » ;
+ *  - secret : sort du lanceur sur lui-même, les autres voient seulement « sort secret ».
+ */
+export type SpellVisibility = 'public' | 'private' | 'secret';
 
 export interface SpellDef {
   id: string;
   name: string;
   desc: string;
-  target: 'opp' | 'self';
+  /**
+   * opp : vise un adversaire (le défenseur calcule le résultat sur sa grille) ;
+   * self : agit en secret sur mon plateau ;
+   * own : agit sur ma grille ou sur l'ordre des tours, au vu de tous (résultat calculé par
+   * le lanceur et vérifié par chacun).
+   */
+  target: 'opp' | 'self' | 'own';
   param: SpellParam;
+  visibility: SpellVisibility;
   /** Nombre de bords voisins pour un tir en rafale (param 'run'). */
   count?: number;
+  /** Nombre minimal de joueurs dans la partie pour que le sort existe (2 par défaut). */
+  minPlayers?: number;
 }
 
 export const SPELLS: readonly SpellDef[] = [
-  { id: 'reveal', name: 'Révélation', desc: 'Dévoile une case de la grille adverse : vide ou occupée, et la couleur de la pièce.', target: 'opp', param: 'cell' },
-  { id: 'loupe', name: 'Loupe', desc: 'Dévoile un bloc de 2 × 2 cases, case par case (vide ou occupée, avec la couleur).', target: 'opp', param: 'cell' },
-  { id: 'radar', name: 'Radar', desc: 'Compte les cases occupées d’une ligne ou d’une colonne adverse.', target: 'opp', param: 'line' },
-  { id: 'histo', name: 'Histogramme', desc: 'Compte les cases occupées de toutes les lignes, ou de toutes les colonnes, de la grille adverse.', target: 'opp', param: 'axis' },
-  { id: 'prisme', name: 'Prisme', desc: 'Donne les couleurs présentes dans une ligne ou une colonne adverse (sans les positions).', target: 'opp', param: 'line' },
-  { id: 'sonar', name: 'Sonar', desc: 'Compte les cases occupées et les couleurs dans un carré de 3 × 3 autour d’une case.', target: 'opp', param: 'cell' },
-  { id: 'hint', name: 'Indice', desc: 'Dévoile une case occupée au hasard (avec sa couleur).', target: 'opp', param: 'none' },
-  { id: 'diag', name: 'Diagonale', desc: 'Compte les cases occupées sur une grande diagonale adverse.', target: 'opp', param: 'diag' },
-  { id: 'half', name: 'Moitié', desc: 'Compte les cases occupées dans une moitié de la grille adverse (haut, bas, gauche ou droite).', target: 'opp', param: 'half' },
-  { id: 'ring', name: 'Périmètre', desc: 'Compte les cases occupées sur le contour de la grille adverse (les 36 cases du bord).', target: 'opp', param: 'none' },
-  { id: 'center', name: 'Centre', desc: 'Compte les cases occupées dans le carré central 4 × 4 de la grille adverse.', target: 'opp', param: 'none' },
-  { id: 'colorscan', name: 'Détecteur', desc: 'Choisis une couleur : tu apprends combien de cases elle occupe encore chez l’adversaire.', target: 'opp', param: 'color' },
-  { id: 'double', name: 'Double tir', desc: 'Tire par deux bords différents en un seul tour.', target: 'opp', param: 'edge2' },
-  { id: 'salve', name: 'Salve', desc: 'Tire par trois bords voisins en un seul tour.', target: 'opp', param: 'run', count: 3 },
-  { id: 'rafale', name: 'Rafale', desc: 'Tire par cinq bords voisins en un seul tour.', target: 'opp', param: 'run', count: 5 },
-  { id: 'spy', name: 'Espion', desc: 'Tu apprends combien de sorts l’adversaire a en réserve.', target: 'opp', param: 'none' },
-  { id: 'steal', name: 'Vol de sort', desc: 'Prend un sort au hasard dans la réserve de l’adversaire.', target: 'opp', param: 'none' },
-  { id: 'sabotage', name: 'Sabotage', desc: 'Détruit un sort au hasard dans la réserve de l’adversaire.', target: 'opp', param: 'none' },
-  { id: 'silence', name: 'Silence', desc: 'L’adversaire ne pourra pas lancer de sort à son prochain tour.', target: 'opp', param: 'none' },
-  { id: 'freeze', name: 'Gel', desc: 'Ne prend pas ton tour : tu joues ensuite deux tours de suite avant que l’adversaire reprenne la main.', target: 'opp', param: 'none' },
-  { id: 'addpiece', name: 'Renfort', desc: 'Ajoute une pièce de ton choix à TA grille, où tu veux : l’adversaire a une pièce de plus à trouver. Il la voit apparaître dans son carnet, mais pas où elle est.', target: 'opp', param: 'piece' },
-  { id: 'shuffle', name: 'Tempête', desc: 'Mélange toute TA grille au hasard, y compris tes pièces coulées qui reviennent en jeu. L’adversaire le voit : son carnet est remis à zéro (croix, formes supposées et pièces coulées) et il doit tout retrouver.', target: 'opp', param: 'none' },
-  { id: 'relocate', name: 'Déménagement', desc: 'Déplace une de tes pièces à flot au hasard sur un nouvel emplacement libre, sans que l’adversaire le sache.', target: 'self', param: 'none' },
-  { id: 'pivot', name: 'Pivot', desc: 'Fait pivoter une de tes pièces à flot sur place, sans que l’adversaire le sache.', target: 'self', param: 'none' },
-  { id: 'revive', name: 'Résurrection', desc: 'Ressuscite une de tes pièces coulées, au hasard. L’adversaire voit laquelle revient en jeu (elle n’est plus « coulée » dans son carnet) et peut la couler de nouveau. Elle revient à sa place, ou ailleurs en secret si une autre pièce l’occupe maintenant.', target: 'opp', param: 'revived' },
-  { id: 'fog', name: 'Brume', desc: 'Le prochain tir reçu ne révèle aucune couleur.', target: 'self', param: 'none' },
-  { id: 'decoy', name: 'Leurre', desc: 'Le prochain tir reçu annoncera une fausse couleur en plus des vraies.', target: 'self', param: 'none' },
-  { id: 'mirage', name: 'Mirage', desc: 'Le prochain tir reçu traverse ta grille comme si elle était vide.', target: 'self', param: 'none' },
-  { id: 'camouflage', name: 'Camouflage', desc: 'La prochaine déclaration de l’adversaire sera refusée, même si elle est juste : il perd son tour.', target: 'self', param: 'none' },
-  { id: 'draw', name: 'Pioche', desc: 'Pioche tout de suite deux nouveaux sorts au hasard.', target: 'self', param: 'none' },
+  { id: 'reveal', name: 'Révélation', desc: 'Dévoile une case de la grille visée : vide ou occupée, et la couleur de la pièce.', target: 'opp', param: 'cell', visibility: 'private' },
+  { id: 'loupe', name: 'Loupe', desc: 'Dévoile un bloc de 2 × 2 cases, case par case (vide ou occupée, avec la couleur).', target: 'opp', param: 'cell', visibility: 'private' },
+  { id: 'radar', name: 'Radar', desc: 'Compte les cases occupées d’une ligne ou d’une colonne de la grille visée.', target: 'opp', param: 'line', visibility: 'private' },
+  { id: 'histo', name: 'Histogramme', desc: 'Compte les cases occupées de toutes les lignes, ou de toutes les colonnes, de la grille visée.', target: 'opp', param: 'axis', visibility: 'private' },
+  { id: 'prisme', name: 'Prisme', desc: 'Donne les couleurs présentes dans une ligne ou une colonne de la grille visée (sans les positions).', target: 'opp', param: 'line', visibility: 'private' },
+  { id: 'sonar', name: 'Sonar', desc: 'Compte les cases occupées et les couleurs dans un carré de 3 × 3 autour d’une case.', target: 'opp', param: 'cell', visibility: 'private' },
+  { id: 'hint', name: 'Indice', desc: 'Dévoile une case occupée au hasard (avec sa couleur).', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'diag', name: 'Diagonale', desc: 'Compte les cases occupées sur une grande diagonale de la grille visée.', target: 'opp', param: 'diag', visibility: 'private' },
+  { id: 'half', name: 'Moitié', desc: 'Compte les cases occupées dans une moitié de la grille visée (haut, bas, gauche ou droite).', target: 'opp', param: 'half', visibility: 'private' },
+  { id: 'ring', name: 'Périmètre', desc: 'Compte les cases occupées sur le contour de la grille visée (les 36 cases du bord).', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'center', name: 'Centre', desc: 'Compte les cases occupées dans le carré central 4 × 4 de la grille visée.', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'colorscan', name: 'Détecteur', desc: 'Choisis une couleur : tu apprends combien de cases elle occupe encore chez le joueur visé.', target: 'opp', param: 'color', visibility: 'private' },
+  { id: 'double', name: 'Double tir', desc: 'Tire par deux bords différents en un seul tour. Comme tout tir, tout le monde voit le résultat.', target: 'opp', param: 'edge2', visibility: 'public' },
+  { id: 'salve', name: 'Salve', desc: 'Tire par trois bords voisins en un seul tour. Comme tout tir, tout le monde voit le résultat.', target: 'opp', param: 'run', count: 3, visibility: 'public' },
+  { id: 'rafale', name: 'Rafale', desc: 'Tire par cinq bords voisins en un seul tour. Comme tout tir, tout le monde voit le résultat.', target: 'opp', param: 'run', count: 5, visibility: 'public' },
+  { id: 'spy', name: 'Espion', desc: 'Tu apprends combien de sorts le joueur visé a en réserve.', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'steal', name: 'Vol de sort', desc: 'Prend un sort au hasard dans la réserve du joueur visé.', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'sabotage', name: 'Sabotage', desc: 'Détruit un sort au hasard dans la réserve du joueur visé.', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'silence', name: 'Silence', desc: 'Le joueur visé ne pourra pas lancer de sort à son prochain tour.', target: 'opp', param: 'none', visibility: 'private' },
+  { id: 'freeze', name: 'Gel', desc: 'Ne prend pas ton tour : tu rejoues tout de suite, et le joueur visé saute son prochain tour. (À deux : tu joues deux tours de suite.)', target: 'opp', param: 'none', visibility: 'public' },
+  { id: 'addpiece', name: 'Renfort', desc: 'Ajoute une pièce de ton choix à TA grille, où tu veux : tes adversaires ont une pièce de plus à trouver. Ils la voient apparaître dans leur carnet, mais pas où elle est.', target: 'own', param: 'piece', visibility: 'public' },
+  { id: 'shuffle', name: 'Tempête', desc: 'Mélange toute TA grille au hasard, y compris tes pièces coulées qui reviennent en jeu. Tout le monde le voit : les carnets te concernant sont remis à zéro (croix, formes supposées et pièces coulées).', target: 'own', param: 'none', visibility: 'public' },
+  { id: 'relocate', name: 'Déménagement', desc: 'Déplace une de tes pièces à flot au hasard sur un nouvel emplacement libre, sans que personne le sache.', target: 'self', param: 'none', visibility: 'secret' },
+  { id: 'pivot', name: 'Pivot', desc: 'Fait pivoter une de tes pièces à flot sur place, sans que personne le sache.', target: 'self', param: 'none', visibility: 'secret' },
+  { id: 'revive', name: 'Résurrection', desc: 'Ressuscite une de tes pièces coulées, au hasard. Tout le monde voit laquelle revient en jeu (elle n’est plus « coulée » dans les carnets) et peut la couler de nouveau. Elle revient à un emplacement libre choisi au hasard, que les adversaires ne connaissent pas.', target: 'own', param: 'revived', visibility: 'public' },
+  { id: 'fog', name: 'Brume', desc: 'Le prochain tir reçu ne révèle aucune couleur.', target: 'self', param: 'none', visibility: 'secret' },
+  { id: 'decoy', name: 'Leurre', desc: 'Le prochain tir reçu annoncera une fausse couleur en plus des vraies.', target: 'self', param: 'none', visibility: 'secret' },
+  { id: 'mirage', name: 'Mirage', desc: 'Le prochain tir reçu traverse ta grille comme si elle était vide.', target: 'self', param: 'none', visibility: 'secret' },
+  { id: 'camouflage', name: 'Camouflage', desc: 'La prochaine déclaration visant ta grille sera refusée, même si elle est juste : son auteur perd son tour.', target: 'self', param: 'none', visibility: 'secret' },
+  { id: 'draw', name: 'Pioche', desc: 'Pioche tout de suite deux nouveaux sorts au hasard.', target: 'self', param: 'none', visibility: 'secret' },
+  // ---- sorts réservés aux parties à 3 ou 4 joueurs (ordre des tours) ----
+  { id: 'skip', name: 'Saut', desc: 'Le joueur suivant saute son tour.', target: 'own', param: 'none', visibility: 'public', minPlayers: 3 },
+  { id: 'doubleskip', name: 'Double saut', desc: 'Les deux joueurs suivants sautent leur tour (à trois, tu rejoues donc tout de suite).', target: 'own', param: 'none', visibility: 'public', minPlayers: 3 },
+  { id: 'reverse', name: 'Inversion', desc: 'Inverse le sens de rotation des tours pour le reste de la partie (jusqu’à une autre Inversion).', target: 'own', param: 'none', visibility: 'public', minPlayers: 3 },
+  { id: 'relay', name: 'Relais', desc: 'Le joueur que tu désignes joue juste après toi, puis la rotation reprend à partir de lui.', target: 'own', param: 'player', visibility: 'public', minPlayers: 3 },
+  { id: 'divert', name: 'Diversion', desc: 'Le joueur suivant est obligé de viser le joueur que tu désignes (si celui-ci est encore en jeu et n’est pas le joueur suivant lui-même).', target: 'own', param: 'player', visibility: 'public', minPlayers: 3 },
+  { id: 'silenceall', name: 'Silence général', desc: 'Aucun de tes adversaires ne pourra lancer de sort à son prochain tour.', target: 'own', param: 'none', visibility: 'public', minPlayers: 3 },
 ];
 
 export const SPELL_IDS: readonly string[] = SPELLS.map((s) => s.id);
@@ -63,6 +89,17 @@ const BY_ID: Record<string, SpellDef> = Object.fromEntries(SPELLS.map((s) => [s.
 
 export function spellDef(id: string): SpellDef | undefined {
   return Object.prototype.hasOwnProperty.call(BY_ID, id) ? BY_ID[id] : undefined;
+}
+
+/** Sorts qui existent dans une partie à `players` joueurs. */
+export function spellsFor(players: number): SpellDef[] {
+  return SPELLS.filter((s) => (s.minPlayers ?? 2) <= players);
+}
+
+/** Sorts dont le lanceur calcule lui-même le résultat (sa grille, l'ordre des tours, son secret). */
+export function isOwnSpell(id: string): boolean {
+  const d = spellDef(id);
+  return !!d && (d.target === 'own' || d.target === 'self');
 }
 
 // ---------- réglages ----------

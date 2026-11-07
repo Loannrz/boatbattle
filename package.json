@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Bataille navale laser et miroirs, à deux joueurs, en pair à pair (PWA).",
+  "description": "Bataille navale laser et miroirs, de 2 à 4 joueurs, en pair à pair (PWA).",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",

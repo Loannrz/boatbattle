@@ -77,7 +77,7 @@ export function spellOverlays(e: TurnEntry, selfSpell?: string): Overlay[] {
     case 'shuffle':
       return [{ kind: 'glyph', text: '⇄' }, { kind: 'caption', text: 'Grille mélangée : carnet remis à zéro' }];
     case 'revive':
-      return [{ kind: 'cells', tone: 'found', cells: (a.cells ?? []).map((x) => ({ r: x.r, c: x.c, fill: hex(a.color) })) }, { kind: 'caption', text: 'Pièce ressuscitée' }];
+      return [{ kind: 'cells', tone: 'empty', cells: (a.cells ?? []).map((x) => ({ r: x.r, c: x.c })) }, { kind: 'caption', text: 'Ressuscitée ailleurs, en secret' }];
     case 'spy':
       return [{ kind: 'caption', text: `${plural(count, 'sort', 'sorts')} en réserve` }];
     case 'steal':
@@ -87,11 +87,25 @@ export function spellOverlays(e: TurnEntry, selfSpell?: string): Overlay[] {
     case 'silence':
       return [{ kind: 'caption', text: 'Silence' }];
     case 'freeze':
-      return [{ kind: 'caption', text: 'Gel : deux tours de suite' }];
+      return [{ kind: 'glyph', text: '❄' }, { kind: 'caption', text: 'Gel : la cible saute un tour' }];
     case 'addpiece':
       return [{ kind: 'caption', text: r.piece ? 'Une pièce de plus' : 'Renfort refusé' }];
     case 'self':
       return [{ kind: 'caption', text: selfSpell ? spellName(selfSpell) : 'Sort secret' }];
+    case 'hidden':
+      return [{ kind: 'glyph', text: '?' }, { kind: 'caption', text: 'Sort privé' }];
+    case 'skip':
+      return [{ kind: 'glyph', text: '↷' }, { kind: 'caption', text: 'Le suivant saute son tour' }];
+    case 'doubleskip':
+      return [{ kind: 'glyph', text: '↷↷' }, { kind: 'caption', text: 'Les deux suivants sautent' }];
+    case 'reverse':
+      return [{ kind: 'glyph', text: '⟲' }, { kind: 'caption', text: 'Sens des tours inversé' }];
+    case 'relay':
+      return [{ kind: 'glyph', text: '➜' }, { kind: 'caption', text: 'Relais' }];
+    case 'divert':
+      return [{ kind: 'glyph', text: '◎' }, { kind: 'caption', text: 'Diversion' }];
+    case 'silenceall':
+      return [{ kind: 'glyph', text: 'Zz' }, { kind: 'caption', text: 'Silence général' }];
     default:
       return [];
   }
@@ -105,7 +119,7 @@ export function activeEffects(session: PlayerSession): string[] {
   if (fx.decoy) out.push('Leurre : le prochain tir annoncera une fausse couleur');
   if (fx.mirage) out.push('Mirage : le prochain tir traversera ta grille');
   if (fx.camouflage) out.push('Camouflage : la prochaine déclaration sera refusée');
-  if (silenced) out.push('Silence : pas de sort à ce tour');
+  if (silenced) out.push('Silence : pas de sort à ton prochain tour');
   return out;
 }
 
@@ -161,7 +175,7 @@ export function demoOverlays(id: string): Overlay[] {
     case 'silence':
       return [{ kind: 'glyph', text: 'Zz' }];
     case 'freeze':
-      return [{ kind: 'glyph', text: '❄' }, { kind: 'caption', text: '2 tours' }];
+      return [{ kind: 'glyph', text: '❄' }, { kind: 'caption', text: 'la cible saute un tour' }];
     case 'addpiece':
       return [{ kind: 'cells', tone: 'found', cells: [found(4, 4, '#6aa86a'), found(4, 5, '#6aa86a'), found(5, 4, '#6aa86a')] }, { kind: 'glyph', text: '+' }];
     case 'shuffle':
@@ -182,6 +196,18 @@ export function demoOverlays(id: string): Overlay[] {
       return [{ kind: 'glyph', text: '✕' }];
     case 'draw':
       return [{ kind: 'glyph', text: '+2' }];
+    case 'skip':
+      return [{ kind: 'glyph', text: '↷' }, { kind: 'caption', text: '1 joueur saute' }];
+    case 'doubleskip':
+      return [{ kind: 'glyph', text: '↷↷' }, { kind: 'caption', text: '2 joueurs sautent' }];
+    case 'reverse':
+      return [{ kind: 'glyph', text: '⟲' }];
+    case 'relay':
+      return [{ kind: 'glyph', text: '➜' }, { kind: 'caption', text: 'à toi, puis lui' }];
+    case 'divert':
+      return [{ kind: 'glyph', text: '◎' }, { kind: 'caption', text: 'cible imposée' }];
+    case 'silenceall':
+      return [{ kind: 'glyph', text: 'Zz' }, { kind: 'caption', text: 'tous les adversaires' }];
     default:
       return spellDef(id) ? [] : [];
   }

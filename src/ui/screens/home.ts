@@ -9,7 +9,7 @@ export function rulesContent(): HTMLElement {
   return h(
     'div',
     { class: 'rules' },
-    h('p', null, 'Chaque joueur cache ses pièces sur sa grille de 10 × 10 (colonnes A à J, lignes 1 à 10). Les deux joueurs ont le même jeu de pièces, choisi par celui qui crée la partie.'),
+    h('p', null, 'Chaque joueur cache ses pièces sur sa grille de 10 × 10 (colonnes A à J, lignes 1 à 10). Tous les joueurs (2 à 4) ont le même jeu de pièces, choisi par celui qui crée la partie.'),
     h('p', null, 'À ton tour, tire un laser depuis un bord : une colonne par le haut ou le bas, ou une ligne par la gauche ou la droite.'),
     h(
       'ul',
@@ -19,7 +19,8 @@ export function rulesContent(): HTMLElement {
       h('li', null, 'Diagonale d’un triangle (le miroir) : il tourne à 90°. Un grand triangle a une longue diagonale : le laser y rebondit où qu’il l’atteigne.'),
       h('li', null, 'On annonce où il ressort, et les couleurs touchées dans l’ordre.'),
     ),
-    h('p', null, `Au lieu de tirer, tu peux déclarer une pièce adverse (couleur, forme et toutes ses cases). ${claimRuleText()} Le premier qui coule toutes les pièces adverses gagne.`),
+    h('p', null, `Au lieu de tirer, tu peux déclarer une pièce adverse (couleur, forme et toutes ses cases). ${claimRuleText()} À deux, le premier qui coule toutes les pièces adverses gagne.`),
+    h('p', null, 'À 3 ou 4 joueurs, chacun joue pour soi : à ton tour, tu choisis la grille d’un adversaire et tu tires ou déclares dessus. Les tours tournent entre les joueurs encore en jeu. Un joueur dont toutes les pièces sont coulées est éliminé (il suit la fin de la partie). Le dernier à flot gagne. Les tirs et déclarations sont vus de tous ; un sort visé n’est détaillé qu’au lanceur et à la cible.'),
   );
 }
 
@@ -53,16 +54,16 @@ export function renderHome(app: App): HTMLElement {
     ),
     h('label', { class: 'field' }, h('span', null, 'Ton prénom'), nameInput),
     resume ? big('Reprendre la partie', resume, ICONS.play, () => app.resume(), 'primary') : null,
-    h('h2', { class: 'section-title' }, 'Deux téléphones'),
-    big('Créer une partie', `Avec le jeu « ${set.name} » (${stats.pieces} pièces)`, ICONS.link, () => app.startOnline('host'), resume ? 'secondary' : 'primary'),
-    big('Rejoindre une partie', 'Scanne ou colle le code reçu', ICONS.camera, () => app.startOnline('guest')),
+    h('h2', { class: 'section-title' }, 'Plusieurs téléphones (2 à 4 joueurs)'),
+    big('Créer une partie', `Jusqu’à 4 joueurs · jeu « ${set.name} » (${stats.pieces} pièces)`, ICONS.link, () => app.startOnline('host'), resume ? 'secondary' : 'primary'),
+    big('Rejoindre une partie', 'Scanne ou colle le code reçu de l’hôte', ICONS.camera, () => app.startOnline('guest')),
     h('h2', { class: 'section-title' }, 'Un seul téléphone'),
     big('Se passer le téléphone', 'Deux joueurs, chacun son tour', ICONS.users, () => app.startLocal()),
     big('S’entraîner contre un robot', 'Le robot tire au hasard', ICONS.robot, () => app.startBot()),
     h('h2', { class: 'section-title' }, 'Pièces'),
     big('Réglages des pièces', `Jeu actuel : ${set.name} · créer des jeux et des formes`, ICONS.shapes, () => app.openSettings()),
     h('button', { class: 'btn btn-ghost', onclick: () => modal('Règles du jeu', rulesContent(), [{ label: 'Compris', value: 'ok', kind: 'primary' }]) }, icon(ICONS.book), 'Règles du jeu'),
-    h('p', { class: 'footnote' }, 'Aucun compte, aucun serveur : les téléphones se parlent directement. Le placement de tes pièces ne quitte jamais ton téléphone.'),
+    h('p', { class: 'footnote' }, 'Aucun compte, aucun serveur : les téléphones se parlent directement (chaque invité est relié à l’hôte, qui relaie). Le placement de tes pièces ne quitte jamais ton téléphone.'),
   );
 }
 

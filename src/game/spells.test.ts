@@ -25,6 +25,8 @@ async function game() {
   host.attach(ta);
   guest.attach(tb);
   await flush();
+  host.launch();
+  await flush();
   guest.acceptProposedSet();
   await flush();
   host.setPlacement(randomPlacement(cat, { random: seededRandom(1) }));
@@ -91,7 +93,7 @@ describe('sorts', () => {
     await flush();
     expect(host.myPieces.length).toBe(cat.pieces.length + 1);
     expect(host.state.placement.length).toBe(cat.pieces.length + 1);
-    expect(guest.oppPieces.length).toBe(cat.pieces.length + 1);
+    expect(guest.piecesOf(0).length).toBe(cat.pieces.length + 1);
     expect(guest.myPieces.length).toBe(cat.pieces.length);
     expect(guest.state.placement.length).toBe(cat.pieces.length);
   });
@@ -103,7 +105,7 @@ describe('sorts', () => {
     const def = cat.pieces.find((d) => d.id === dead.pieceId)!;
     host.claim({ color: def.color, shape: def.shape, cells: placementParts(dead, cat) });
     await flush();
-    host.setNotes({ marks: { '0,0': 'x' }, guesses: [] });
+    host.setNotes(1, { marks: { '0,0': 'x' }, guesses: [] });
     guest.shoot({ side: 'top', index: 0 });
     await flush();
     expect(host.oppSunk.length).toBe(1);
@@ -119,8 +121,8 @@ describe('sorts', () => {
     expect(validatePlacement(guest.state.placement, guest.catalog!, { requireAll: true }).length).toBe(0);
     expect(host.state.log[host.state.log.length - 1].action).toEqual({ kind: 'spell', spell: 'shuffle' });
     expect(host.oppSunk.length).toBe(0);
-    expect(host.state.notes).toEqual({ marks: {}, guesses: [] });
-    expect(host.notesResetAt).toBe(host.state.log.length - 1);
+    expect(host.notesFor(1)).toEqual({ marks: {}, guesses: [] });
+    expect(host.notesResetAt(1)).toBe(host.state.log.length - 1);
   });
 
   it('Salve, Rafale et Double tir fonctionnent', async () => {
@@ -226,7 +228,7 @@ describe('sorts', () => {
     expect(validatePlacement(host.state.placement, host.catalog!, { requireAll: true }).length).toBe(0);
   });
 
-  it('Résurrection publique : l’adversaire voit la pièce revenir et peut la recouler', async () => {
+  it('Résurrection publique : la pièce revient en jeu à un emplacement aléatoire secret, et peut être recoulée', async () => {
     const { host, guest } = await game();
     const p = guest.state.placement[0];
     const def = cat.pieces.find((d) => d.id === p.pieceId)!;
@@ -234,18 +236,56 @@ describe('sorts', () => {
     host.claim(claim);
     await flush();
     expect(guest.mySunk.has(p.pieceId)).toBe(true);
-    expect(host.oppSunk.length).toBe(1);
+    expect(host.sunkClaimsOf(1).length).toBe(1);
     guest.state.spells.push('revive');
     expect(guest.cast('revive')).toBe(true);
     await flush();
     expect(guest.mySunk.has(p.pieceId)).toBe(false);
-    expect(host.oppSunk.length).toBe(0); // plus coulée dans le carnet de l'adversaire
-    expect(host.state.log[host.state.log.length - 1].action.kind).toBe('spell');
-    host.claim(claim);
+    expect(host.sunkClaimsOf(1).length).toBe(0); // plus coulée dans le carnet de l'adversaire
+    const last = host.state.log[host.state.log.length - 1];
+    expect(last.action.kind === 'spell' && last.action.spell).toBe('revive');
+    expect(last.action.kind === 'spell' && last.action.cells).toEqual(claim.cells); // les anciennes cases, pas les nouvelles
+    expect(validatePlacement(guest.state.placement, guest.catalog!, { requireAll: true }).length).toBe(0);
+    // Le nouvel emplacement n'est pas annoncé : rien d'autre que les anciennes cases ne circule.
+    const moved = guest.state.placement.find((x) => x.pieceId === p.pieceId)!;
+    expect(JSON.stringify(last.action)).not.toContain(JSON.stringify(placementParts(moved, cat)));
+    // Elle se recoule avec ses nouvelles cases.
+    host.claim({ color: def.color, shape: def.shape, cells: placementParts(moved, cat) });
     await flush();
     const r = host.state.log[host.state.log.length - 1].result;
     expect(r.kind === 'claim' && r.ok).toBe(true);
-    expect(host.oppSunk.length).toBe(1);
+    expect(host.sunkClaimsOf(1).length).toBe(1);
+  });
+
+  it('Résurrection : l’emplacement est toujours tiré au hasard (pas forcément l’ancien)', async () => {
+    const spots = new Set<string>();
+    for (let seed = 1; seed <= 6; seed++) {
+      const host = new PlayerSession(freshState('online', 0, 'A', newGameId(), CLASSIC_SET, cfg), null, '', hostRandom());
+      const guest = new PlayerSession(freshState('online', 1, 'B', '', null), null, '', seededRandom(seed * 31));
+      const [ta, tb] = createLocalPair();
+      host.attach(ta);
+      guest.attach(tb);
+      await flush();
+      host.launch();
+      await flush();
+      guest.acceptProposedSet();
+      await flush();
+      host.setPlacement(randomPlacement(cat, { random: seededRandom(1) }));
+      host.markReady();
+      guest.setPlacement(randomPlacement(cat, { random: seededRandom(2) }));
+      guest.markReady();
+      await flush();
+      const p = guest.state.placement[0];
+      const def = cat.pieces.find((d) => d.id === p.pieceId)!;
+      host.claim({ color: def.color, shape: def.shape, cells: placementParts(p, cat) });
+      await flush();
+      guest.state.spells.push('revive');
+      expect(guest.cast('revive')).toBe(true);
+      await flush();
+      const moved = guest.state.placement.find((x) => x.pieceId === p.pieceId)!;
+      spots.add(JSON.stringify(moved));
+    }
+    expect(spots.size).toBeGreaterThan(1);
   });
 
   it('on peut poser sur une pièce coulée, et la ressuscitée ne chevauche jamais une pièce à flot', async () => {
@@ -309,10 +349,10 @@ describe('sorts', () => {
     const { host, guest } = await game();
     guest.setActivity('notes');
     await flush();
-    expect(host.oppActivity).toBe('notes');
+    expect(host.activities[1]).toBe('notes');
     guest.setActivity('spell-pick');
     await flush();
-    expect(host.oppActivity).toBe('spell-pick');
+    expect(host.activities[1]).toBe('spell-pick');
     expect(parseMessage({ t: 'activity', a: 'hack' })).toBeNull();
     expect(parseMessage({ t: 'activity', a: 'board' })).toEqual({ t: 'activity', a: 'board' });
     host.detach();
@@ -323,8 +363,13 @@ describe('sorts', () => {
     expect(isValidAction({ kind: 'spell', spell: 'radar', axis: 'row', index: 3 })).toBe(true);
     expect(isValidAction({ kind: 'spell', spell: 'radar' })).toBe(false);
     expect(isValidAction({ kind: 'spell', spell: 'inconnu' })).toBe(false);
-    expect(isValidAction({ kind: 'spell', spell: 'revive' })).toBe(false); // un sort secret ne s'envoie pas sous son nom
+    expect(isValidAction({ kind: 'spell', spell: 'revive' })).toBe(false); // il manque la pièce ressuscitée
+    expect(isValidAction({ kind: 'spell', spell: 'fog' })).toBe(false); // un sort secret ne s'envoie pas sous son nom
     expect(isValidAction({ kind: 'spell', spell: 'self' })).toBe(true);
+    expect(isValidAction({ kind: 'spell', spell: 'hidden' })).toBe(true);
+    expect(isValidAction({ kind: 'spell', spell: 'relay', who: 2 })).toBe(true);
+    expect(isValidAction({ kind: 'spell', spell: 'relay', who: 4 })).toBe(false);
+    expect(isValidAction({ kind: 'spell', spell: 'skip' })).toBe(true);
     expect(isValidResult({ kind: 'spell', spell: 'radar', count: 3 })).toBe(true);
     expect(isValidResult({ kind: 'spell', spell: 'radar', count: -1 })).toBe(false);
     expect(isValidResult({ kind: 'spell', spell: 'addpiece', piece: { id: 'ok', shape: 's', color: 'red' } })).toBe(false);

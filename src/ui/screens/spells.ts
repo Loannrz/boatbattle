@@ -3,10 +3,10 @@
  */
 
 import { COLORS } from '../../config/pieces';
-import { COL_LABELS, GRID_SIZE, SPELLS, cellLabel, catalogOf, spellDef, validatePlacement, type Edge, type Rotation, type Side, type SpellDef } from '../../engine';
+import { COL_LABELS, GRID_SIZE, cellLabel, catalogOf, spellDef, spellsFor, validatePlacement, type Edge, type Rotation, type Side, type SpellDef } from '../../engine';
 import type { PlayerSession } from '../../game/session';
-import type { SpellAction } from '../../game/protocol';
-import type { App } from '../app';
+import type { PlayerIndex, SpellAction } from '../../game/protocol';
+import { playerColor, type App } from '../app';
 import { confirmBox, h, icon, toast } from '../dom';
 import { ICONS } from '../icons';
 import { createPieceEditor } from '../pieceEditor';
@@ -140,10 +140,29 @@ async function pickPieceAndSpot(app: App, session: PlayerSession): Promise<{ par
   return spot ? { params: { shape: choice.shape, color: choice.color }, spot } : null;
 }
 
-async function askParams(def: SpellDef, session: PlayerSession): Promise<Partial<SpellAction> | null> {
+/** Choix d'un joueur parmi `choices` (cible d'un sort, ou joueur désigné par Relais / Diversion). */
+async function pickPlayer(session: PlayerSession, choices: PlayerIndex[], title: string, intro: string): Promise<PlayerIndex | null> {
+  if (choices.length === 0) {
+    toast('Aucun joueur pour qui ce sort ait un effet.', 'warn', 2500);
+    return null;
+  }
+  if (choices.length === 1) return choices[0];
+  return options<PlayerIndex>(
+    title,
+    choices.map((i) => ({ label: session.nameOf(i), value: i, swatch: playerColor(i) })),
+    choices.length > 2 ? 2 : choices.length,
+    intro,
+  );
+}
+
+async function askParams(def: SpellDef, session: PlayerSession, target: PlayerIndex | null): Promise<Partial<SpellAction> | null> {
   switch (def.param) {
     case 'none':
       return {};
+    case 'player': {
+      const who = await pickPlayer(session, session.whoChoices(def.id), def.name, def.id === 'relay' ? 'Qui joue juste après toi ?' : 'Qui le joueur suivant devra-t-il viser ?');
+      return who === null ? null : { who };
+    }
     case 'cell': {
       const cell = await pickCell(def.name);
       return cell;
@@ -168,12 +187,12 @@ async function askParams(def: SpellDef, session: PlayerSession): Promise<Partial
         { label: 'Moitié droite', value: { opt: 'right' } },
       ]);
     case 'color': {
-      const colors = [...new Set(session.oppPieces.map((p) => p.color))];
+      const colors = [...new Set(session.piecesOf(target ?? session.opp).map((p) => p.color))];
       return options<Partial<SpellAction>>(
         def.name,
         colors.map((c) => ({ label: COLORS[c]?.name ?? c, value: { color: c }, swatch: COLORS[c]?.hex })),
         2,
-        'Quelle couleur chercher chez l’adversaire ?',
+        `Quelle couleur chercher chez ${target === null ? 'l’adversaire' : session.nameOf(target)} ?`,
       );
     }
     case 'edge2': {
@@ -234,19 +253,31 @@ async function playInner(app: App, session: PlayerSession, def: SpellDef): Promi
   }
   let params: Partial<SpellAction> | null;
   let spot: Spot | undefined;
+  let target: PlayerIndex | null = null;
+  if (def.target === 'opp') {
+    // À 3 ou 4 joueurs : on choisit d'abord qui viser (la grille agrandie dans Tirer est proposée en premier).
+    const choices = session.targetChoices(def.id);
+    if (choices.length <= 1 || session.playerCount === 2) target = choices[0] ?? null;
+    else target = await pickPlayer(session, choices, `${def.name} : sur qui ?`, 'Choisis le joueur visé.');
+    if (target === null) {
+      if (choices.length === 0) toast(session.forcedTarget !== null ? `Diversion : tu dois viser ${session.nameOf(session.forcedTarget)}, et ce sort n’a pas d’effet sur lui.` : 'Personne à viser avec ce sort.', 'warn', 3000);
+      return;
+    }
+  }
   if (def.param === 'piece') {
     const res = await pickPieceAndSpot(app, session);
     if (!res) return;
     params = res.params;
     spot = res.spot;
   } else {
-    params = await askParams(def, session);
+    params = await askParams(def, session, target);
     if (!params) return;
   }
   const cost = def.id === 'freeze' ? 'Ce sort ne prend pas ton tour.' : 'Lancer un sort remplace ton tir de ce tour.';
-  const ok = await confirmBox(`Lancer « ${def.name} » ?`, `${def.desc} ${cost}`, 'Lancer');
+  const onWhom = target !== null && session.playerCount > 2 ? ` Cible : ${session.nameOf(target)}.` : '';
+  const ok = await confirmBox(`Lancer « ${def.name} » ?`, `${def.desc}${onWhom} ${cost}`, 'Lancer');
   if (!ok) return;
-  if (session.cast(def.id, params, spot)) app.setUi({ tab: 'shoot', selectedPiece: null });
+  if (session.cast(def.id, params, spot, target ?? undefined)) app.setUi({ tab: 'shoot', selectedPiece: null, target: session.playerCount > 2 && target !== null ? target : app.ui.target });
   else toast('Impossible de lancer ce sort maintenant.', 'warn');
 }
 
@@ -261,6 +292,12 @@ export function spellsTab(app: App, session: PlayerSession): HTMLElement {
   if (cfg.everyTurns > 0) rules.push(`un sort tous les ${cfg.everyTurns} de tes tours`);
   if (cfg.onSink) rules.push('un sort à chaque pièce adverse coulée');
 
+  const multi = session.playerCount > 2;
+  const visibilityTag = (def: SpellDef) => {
+    if (def.visibility === 'secret') return h('span', { class: 'tag tag-muted' }, 'secret');
+    if (def.visibility === 'public') return h('span', { class: 'tag tag-ok' }, def.target === 'opp' ? 'vise un joueur · public' : 'public');
+    return h('span', { class: 'tag tag-spell' }, multi ? 'vise un joueur · privé' : 'vise l’adversaire');
+  };
   const card = (def: SpellDef, count: number | null) => {
     const blocked = count !== null ? session.spellBlocked(def.id) : 'x';
     const demo = createBoard({ catalog: null, gutter: 'none', overlays: demoOverlays(def.id), label: `Schéma du sort ${def.name}`, className: 'spell-demo' });
@@ -275,7 +312,8 @@ export function spellsTab(app: App, session: PlayerSession): HTMLElement {
           'div',
           { class: 'spell-head' },
           h('strong', null, def.name),
-          h('span', { class: `tag ${def.target === 'self' ? 'tag-muted' : 'tag-ok'}` }, def.target === 'self' ? 'secret' : ['addpiece', 'revive', 'shuffle'].includes(def.id) ? 'public' : 'vise l’adversaire'),
+          visibilityTag(def),
+          (def.minPlayers ?? 2) > 2 ? h('span', { class: 'tag tag-multi' }, `${def.minPlayers}+ joueurs`) : null,
           count !== null && count > 1 ? h('span', { class: 'count' }, `×${count}`) : null,
         ),
         h('p', { class: 'muted small' }, def.desc),
@@ -286,18 +324,20 @@ export function spellsTab(app: App, session: PlayerSession): HTMLElement {
     );
   };
 
-  const mine = SPELLS.filter((d) => counts.has(d.id));
-  const all = SPELLS.filter((d) => cfg.pool.includes(d.id));
+  const available = spellsFor(session.playerCount);
+  const mine = available.filter((d) => counts.has(d.id));
+  const all = available.filter((d) => cfg.pool.includes(d.id));
 
   return h(
     'div',
     { class: 'tab-content' },
     h('h2', { class: 'screen-title' }, 'Sorts', h('span', { class: 'count' }, `${st.spells.length} en réserve`)),
-    h('p', { class: 'muted small' }, rules.length ? `Tu gagnes ${rules.join(' et ')}. Lancer un sort remplace ton tir (sauf Gel).` : 'Aucun sort n’est distribué automatiquement dans cette partie.'),
+    h('p', { class: 'muted small' }, rules.length ? `Tu gagnes ${rules.join(' et ')}. Lancer un sort remplace ton tir (sauf Gel).${multi ? ' Un sort qui vise un joueur te demande d’abord qui viser ; « privé » : seuls toi et la cible en voyez le détail.' : ''}` : 'Aucun sort n’est distribué automatiquement dans cette partie.'),
     st.silenced ? h('p', { class: 'notice' }, 'Réduit au silence : tu ne peux pas lancer de sort à ce tour.') : null,
+    session.forcedTarget !== null ? h('p', { class: 'notice' }, `Diversion : tes sorts qui visent un joueur doivent viser ${session.nameOf(session.forcedTarget)}.`) : null,
     !canAct && mine.length ? h('p', { class: 'muted small' }, 'Tu pourras lancer tes sorts à ton tour.') : null,
     mine.length ? h('div', { class: 'spell-list' }, ...mine.map((d) => card(d, counts.get(d.id)!))) : h('p', { class: 'card' }, 'Ta réserve est vide pour l’instant.'),
-    h('details', { class: 'spell-all' }, h('summary', null, `Tous les sorts de la partie (${all.length})`), h('div', { class: 'spell-list' }, ...all.map((d) => card(d, null)))),
+    h('details', { class: 'spell-all' }, h('summary', null, `Tous les sorts de la partie (${all.length})`), multi ? null : h('p', { class: 'muted small' }, 'Les sorts d’ordre des tours (Saut, Double saut, Inversion, Relais, Diversion, Silence général) n’existent qu’à 3 ou 4 joueurs.'), h('div', { class: 'spell-list' }, ...all.map((d) => card(d, null)))),
   );
 }
 

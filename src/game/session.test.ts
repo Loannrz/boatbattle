@@ -22,9 +22,9 @@ function memoryStore(): KeyValueStore {
 function spy(t: LocalTransport): Message[] {
   const sent: Message[] = [];
   const orig = t.send.bind(t);
-  t.send = (m) => {
+  t.send = (m, to) => {
     sent.push(m);
-    orig(m);
+    orig(m, to);
   };
   return sent;
 }
@@ -35,9 +35,9 @@ function events(s: PlayerSession): SessionEvent[] {
   return out;
 }
 
-/** Hôte + invité connectés ; l'invité accepte le jeu ; les deux sont prêts. */
-async function setupGame(opts: { hostFirst?: boolean; accept?: boolean; ready?: boolean } = {}) {
-  const { hostFirst = true, accept = true, ready = true } = opts;
+/** Hôte + invité connectés ; l'hôte lance la partie ; l'invité accepte le jeu ; les deux sont prêts. */
+async function setupGame(opts: { hostFirst?: boolean; accept?: boolean; ready?: boolean; launch?: boolean } = {}) {
+  const { hostFirst = true, accept = true, ready = true, launch = true } = opts;
   const host = new PlayerSession(freshState('online', 0, 'Alice', newGameId(), CLASSIC_SET), null, '', () => (hostFirst ? 0.1 : 0.9));
   const guest = new PlayerSession(freshState('online', 1, 'Bob', '', null));
   const [ta, tb] = createLocalPair();
@@ -48,6 +48,10 @@ async function setupGame(opts: { hostFirst?: boolean; accept?: boolean; ready?: 
   host.attach(ta);
   guest.attach(tb);
   await flush();
+  if (launch) {
+    expect(host.launch()).toBe(true);
+    await flush();
+  }
   if (accept) {
     guest.acceptProposedSet();
     await flush();
@@ -67,7 +71,21 @@ async function setupGame(opts: { hostFirst?: boolean; accept?: boolean; ready?: 
 const original = { ...RULES };
 afterEach(() => Object.assign(RULES, original));
 
-describe('session : jeu de pièces proposé par l’hôte', () => {
+describe('session : salon et jeu de pièces proposé par l’hôte', () => {
+  it('avant le lancement, les deux sont dans le salon ; l’hôte voit le nom de l’invité', async () => {
+    const { host, guest } = await setupGame({ launch: false, accept: false, ready: false });
+    expect(host.phase).toBe('lobby');
+    expect(guest.phase).toBe('lobby');
+    expect(host.state.players.map((p) => p.name)).toEqual(['Alice', 'Bob']);
+    expect(guest.state.players.map((p) => p.name)).toEqual(['Alice', 'Bob']);
+    expect(guest.state.gameId).toBe(host.state.gameId);
+    expect(guest.launch()).toBe(false); // seul l'hôte lance
+    host.launch();
+    await flush();
+    expect(guest.phase).toBe('review');
+    expect(host.phase).toBe('setup');
+  });
+
   it('l’invité reçoit le jeu, doit l’accepter avant de placer', async () => {
     const { host, guest, guestEvents } = await setupGame({ accept: false, ready: false });
     expect(guest.phase).toBe('review');
@@ -78,14 +96,14 @@ describe('session : jeu de pièces proposé par l’hôte', () => {
     guest.acceptProposedSet();
     await flush();
     expect(guest.phase).toBe('setup');
-    expect(host.state.oppSetHash).toBe(setHash(CLASSIC_SET));
+    expect(host.state.players[1].setHash).toBe(setHash(CLASSIC_SET));
   });
 
   it('refus, puis l’hôte propose un autre jeu, accepté : la partie démarre avec ce jeu', async () => {
     const { host, guest, hostEvents } = await setupGame({ accept: false, ready: false });
     guest.refuseProposedSet();
     await flush();
-    expect(host.state.oppRefused).toBe(true);
+    expect(host.state.players[1].refused).toBe(true);
     expect(hostEvents.some((e) => e.type === 'set-refused')).toBe(true);
     host.startNewGame(TRIANGLES_SET);
     await flush();
@@ -115,7 +133,8 @@ describe('session : déroulement d’une partie', () => {
   it('connexion, prêt, l’hôte tire au sort le premier joueur', async () => {
     const { host, guest } = await setupGame();
     expect(guest.state.gameId).toBe(host.state.gameId);
-    expect(guest.state.oppName).toBe('Alice');
+    expect(guest.nameOf(0)).toBe('Alice');
+    expect(host.nameOf(1)).toBe('Bob');
     expect(host.phase).toBe('playing');
     expect(host.isMyTurn).toBe(true);
     expect(guest.isMyTurn).toBe(false);
@@ -132,6 +151,7 @@ describe('session : déroulement d’une partie', () => {
       exit: expected.exit,
       colors: expected.hits.map((id) => classic.pieces.find((p) => p.id === id)!.color),
     });
+    expect(host.state.log[0].target).toBe(1);
     expect(host.state.log[0].secret).toBeUndefined();
     expect(guest.state.log[0].secret?.hits).toEqual(expected.hits);
 
@@ -157,9 +177,13 @@ describe('session : déroulement d’une partie', () => {
       await flush();
       expect(guest.mySunk.has(p.pieceId)).toBe(true);
     }
+    const last = host.state.log[host.state.log.length - 1].result;
+    expect(last.kind === 'claim' && last.eliminated).toBe(true);
     expect(host.winner).toBe(0);
     expect(guest.winner).toBe(0);
-    expect(host.oppSunk).toHaveLength(12);
+    expect(guest.phase).toBe('over');
+    expect(host.sunkClaimsOf(1)).toHaveLength(12);
+    expect(host.ranking).toEqual([0, 1]);
   });
 
   it('règle « rejouer après une déclaration juste »', async () => {
@@ -176,27 +200,30 @@ describe('session : déroulement d’une partie', () => {
     expect(guest.isMyTurn).toBe(true);
   });
 
-  it('revanche : nouvel identifiant, même jeu, retour au placement', async () => {
+  it('revanche (lancée par l’hôte) : nouvel identifiant, même jeu, mêmes joueurs, retour au placement', async () => {
     const { host, guest } = await setupGame();
     const old = host.state.gameId;
-    guest.startNewGame();
+    expect(guest.startNewGame()).toBe(false);
+    host.startNewGame();
     await flush();
     expect(host.state.gameId).not.toBe(old);
     expect(host.state.gameId).toBe(guest.state.gameId);
     expect(host.phase).toBe('setup');
     expect(guest.phase).toBe('setup');
-    expect(host.state.oppSetHash).toBe(setHash(CLASSIC_SET));
+    expect(guest.state.players.map((p) => p.name)).toEqual(['Alice', 'Bob']);
+    expect(host.state.players[1].setHash).toBe(setHash(CLASSIC_SET));
   });
 
-  it('revanche demandée des deux côtés en même temps : les deux convergent', async () => {
+  it('revanche vers le salon : la partie n’est plus lancée, les joueurs restent', async () => {
     const { host, guest } = await setupGame();
-    host.startNewGame();
-    guest.startNewGame();
+    host.startNewGame(undefined, undefined, true);
     await flush();
-    expect(host.state.gameId).toBe(guest.state.gameId);
-    expect([host.state.myNewGameId, guest.state.myNewGameId].sort()[0]).toBe(host.state.gameId);
-    expect(host.phase).toBe('setup');
-    expect(guest.phase).toBe('setup');
+    expect(host.phase).toBe('lobby');
+    expect(guest.phase).toBe('lobby');
+    expect(guest.state.players.length).toBe(2);
+    host.launch();
+    await flush();
+    expect(guest.phase).toBe('setup'); // le jeu est déjà accepté
   });
 });
 
@@ -249,17 +276,18 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
 
   it('journal falsifié : un résultat inventé par l’attaquant n’est pas accepté par le défenseur', async () => {
     const { host, guest } = await setupGame();
-    // L'hôte prétend avoir coulé une pièce en gagnant la partie, sans l'avoir fait.
+    // L'hôte prétend avoir coulé une pièce en éliminant l'invité, sans l'avoir fait.
     guest.receive(
       JSON.stringify({
         t: 'sync', v: PROTOCOL_VERSION, fp: appFingerprint(), gameId: guest.state.gameId, me: 0, name: 'Alice', ready: true, firstPlayer: 0, pending: null,
-        set: CLASSIC_SET, setHash: setHash(CLASSIC_SET),
-        log: [{ n: 0, by: 0, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 9, c: 9 }] } }, result: { kind: 'claim', ok: true, gameOver: true } }],
+        set: CLASSIC_SET, setHash: setHash(CLASSIC_SET), players: ['Alice', 'Bob'], launched: true,
+        log: [{ n: 0, by: 0, target: 1, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 9, c: 9 }] } }, result: { kind: 'claim', ok: true, eliminated: true } }],
       }),
+      0,
     );
     await flush();
     expect(guest.state.log).toHaveLength(1);
-    expect(guest.state.log[0].result.gameOver).toBeUndefined();
+    expect(guest.state.log[0].result).toEqual({ kind: 'claim', ok: false });
     expect(guest.winner).toBeNull();
     // Mauvais joueur : refusé
     const before = guest.state.log.length;
@@ -267,9 +295,10 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
     guest.receive(
       JSON.stringify({
         t: 'sync', v: PROTOCOL_VERSION, fp: appFingerprint(), gameId: guest.state.gameId, me: 0, name: 'Alice', ready: true, firstPlayer: 0, pending: null,
-        set: CLASSIC_SET, setHash: setHash(CLASSIC_SET),
-        log: [...guest.state.log.map(({ n, by, action, result }) => ({ n, by, action, result })), { n: 1, by: 0, action: { kind: 'shot', edge: { side: 'top', index: 0 } }, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: [] } }],
+        set: CLASSIC_SET, setHash: setHash(CLASSIC_SET), players: ['Alice', 'Bob'], launched: true,
+        log: [...guest.publicLogFor(0), { n: 1, by: 0, target: 1, action: { kind: 'shot', edge: { side: 'top', index: 0 } }, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: [] } }],
       }),
+      0,
     );
     await flush();
     expect(guest.state.log).toHaveLength(before);
@@ -277,10 +306,17 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
     void host;
   });
 
+  it('un expéditeur ne peut pas se faire passer pour un autre : `me` doit correspondre au lien', async () => {
+    const { guest } = await setupGame();
+    const before = JSON.stringify(guest.state);
+    guest.receive(JSON.stringify({ t: 'sync', v: PROTOCOL_VERSION, fp: appFingerprint(), gameId: 'autre', me: 2, name: 'Eve', ready: true, firstPlayer: 0, pending: null, set: null, setHash: null, log: [] }), 0);
+    expect(JSON.stringify(guest.state)).toBe(before);
+  });
+
   it('versions différentes : la synchronisation est refusée', async () => {
     const guest = new PlayerSession(freshState('online', 1, 'Bob', '', null));
     const errs = events(guest);
-    guest.receive(JSON.stringify({ t: 'sync', v: PROTOCOL_VERSION, fp: '0000000000000000', gameId: 'abc', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: CLASSIC_SET, setHash: setHash(CLASSIC_SET) }));
+    guest.receive(JSON.stringify({ t: 'sync', v: PROTOCOL_VERSION, fp: '0000000000000000', gameId: 'abc', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: CLASSIC_SET, setHash: setHash(CLASSIC_SET) }), 0);
     expect(guest.state.gameId).toBe('');
     expect(guest.state.proposedSet).toBeNull();
     expect(errs[0]?.type).toBe('error');
@@ -297,17 +333,24 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
     intruder.attach(b);
     await flush();
     expect(errs.some((e) => e.type === 'error')).toBe(true);
+    expect(host.admit({ me: null, gameId: '', name: 'Eve' })).toEqual({ ok: false, reason: expect.stringContaining('déjà lancée') });
+    // reconnexion : il faut le jeton de la place
+    host.state.players[1].token = 'secret-bob';
+    expect(host.admit({ me: 1, gameId: host.state.gameId, name: 'Bob', token: 'secret-bob' })).toEqual({ ok: true, index: 1, token: 'secret-bob' });
+    expect(host.admit({ me: 1, gameId: host.state.gameId, name: 'Eve', token: 'faux' }).ok).toBe(false);
+    expect(host.admit({ me: 1, gameId: host.state.gameId, name: 'Eve' }).ok).toBe(false);
+    expect(host.admit({ me: 3, gameId: host.state.gameId, name: 'Eve', token: 'x' }).ok).toBe(false);
   });
 
   it('un message reçu en double ne rejoue pas le tour ; une action en avance demande une resynchronisation', async () => {
     const { host, guest, sentByGuest } = await setupGame();
     host.shoot({ side: 'top', index: 5 });
     await flush();
-    guest.receive(JSON.stringify({ t: 'action', n: 0, action: { kind: 'shot', edge: { side: 'top', index: 5 } } }));
+    guest.receive(JSON.stringify({ t: 'action', n: 0, target: 1, action: { kind: 'shot', edge: { side: 'top', index: 5 } } }), 0);
     await flush();
     expect(guest.state.log).toHaveLength(1);
     const count = sentByGuest.length;
-    guest.receive(JSON.stringify({ t: 'action', n: 7, action: { kind: 'shot', edge: { side: 'top', index: 5 } } }));
+    guest.receive(JSON.stringify({ t: 'action', n: 7, target: 1, action: { kind: 'shot', edge: { side: 'top', index: 5 } } }), 0);
     expect(sentByGuest.slice(count).some((m) => m.t === 'sync' && m.ask)).toBe(true);
   });
 
@@ -321,30 +364,55 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
     expect(again.state.ready).toBe(true);
     store.setItem('old', JSON.stringify({ v: 1 }));
     expect(PlayerSession.load(store, 'old')).toBeNull();
+    store.setItem('old2', JSON.stringify({ v: 2, me: 0, log: [], oppName: 'x' }));
+    expect(PlayerSession.load(store, 'old2')).toBeNull();
   });
 });
 
 describe('protocole : messages malformés ou malveillants', () => {
+  const shot = { kind: 'shot', edge: { side: 'top', index: 0 } };
   const bad: unknown[] = [
     'pas du json',
     { t: 'inconnu' },
-    { t: 'action', n: 0, action: { kind: 'shot', edge: { side: 'top', index: 99 } } },
-    { t: 'action', n: -1, action: { kind: 'shot', edge: { side: 'top', index: 0 } } },
-    { t: 'action', n: 0, action: { kind: 'claim', claim: { color: '__proto__', shape: 'carre', cells: [{ r: 0, c: 0 }] } } },
-    { t: 'action', n: 0, action: { kind: 'claim', claim: { color: 'constructor', shape: 'carre', cells: [{ r: 0, c: 0 }] } } },
-    { t: 'action', n: 0, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 0, c: 0, corner: 'XX' }] } } },
-    { t: 'action', n: 0, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: Array(20).fill({ r: 0, c: 0 }) } } },
-    { t: 'result', n: 0, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: ['__proto__'] } },
-    { t: 'result', n: 0, result: { kind: 'claim', ok: true, gameOver: 'oui' } },
-    { t: 'result', n: 0, result: { kind: 'claim', ok: 'true' } },
-    { t: 'start', firstPlayer: 2 },
+    { t: 'result', n: 0, result: { kind: 'claim', ok: true } }, // ancien protocole
+    { t: 'action', n: 0, target: 1, action: { kind: 'shot', edge: { side: 'top', index: 99 } } },
+    { t: 'action', n: -1, target: 1, action: shot },
+    { t: 'action', n: 0, action: shot }, // sans cible
+    { t: 'action', n: 0, target: 4, action: shot },
+    { t: 'action', n: 0, target: 1, action: { kind: 'claim', claim: { color: '__proto__', shape: 'carre', cells: [{ r: 0, c: 0 }] } } },
+    { t: 'action', n: 0, target: 1, action: { kind: 'claim', claim: { color: 'constructor', shape: 'carre', cells: [{ r: 0, c: 0 }] } } },
+    { t: 'action', n: 0, target: 1, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 0, c: 0, corner: 'XX' }] } } },
+    { t: 'action', n: 0, target: 1, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: Array(20).fill({ r: 0, c: 0 }) } } },
+    { t: 'action', n: 0, target: 1, action: { kind: 'spell', spell: 'relay', who: 9 } },
+    { t: 'turn', turn: { n: 0, by: 0, target: 1, action: shot, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: ['__proto__'] } } },
+    { t: 'turn', turn: { n: 0, by: 0, target: 1, action: shot, result: { kind: 'claim', ok: true } } },
+    { t: 'turn', turn: { n: 0, by: 0, target: 1, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 0, c: 0 }] } }, result: { kind: 'claim', ok: true, eliminated: 'oui' } } },
+    { t: 'turn', turn: { n: 0, by: 0, target: 1, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 0, c: 0 }] } }, result: { kind: 'claim', ok: 'true' } } },
+    { t: 'turn', turn: { n: 0, by: 0, action: shot, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: [] } } }, // sans cible
+    { t: 'turn', turn: { n: 0, by: 0, target: 1, action: { kind: 'spell', spell: 'radar', axis: 'row', index: 0 }, result: { kind: 'spell', spell: 'hidden' } } }, // sort incohérent
+    { t: 'start', firstPlayer: 4 },
     { t: 'newgame', gameId: '' },
     { t: 'newgame', gameId: 'x', set: { ...CLASSIC_SET, entries: [{ shape: 'carre', color: '__proto__', count: 1 }] } },
     { t: 'newgame', gameId: 'x', set: { ...CLASSIC_SET, entries: [{ shape: 'tri4', color: 'bleu', count: 6 }], shapes: TRIANGLES_SET.shapes } },
     { t: 'set-accept', hash: '__proto__' },
+    { t: 'roster', players: ['a', 'b', 'c', 'd', 'e'], launched: true },
+    { t: 'roster', players: ['a'], launched: 'oui' },
+    { t: 'presence', online: [true, 'x'] },
+    { t: 'assign', you: 4 },
   ];
   const sync = { t: 'sync', v: PROTOCOL_VERSION, fp: 'x', gameId: 'g', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: null, setHash: null };
-  bad.push({ ...sync, ready: 'true' }, { ...sync, firstPlayer: 3 }, { ...sync, me: '0' }, { ...sync, log: [{ n: 0, by: 0, action: { kind: 'shot', edge: { side: 'top', index: 0 } }, result: { kind: 'claim', ok: true } }] }, { ...sync, setHash: 'zz' });
+  bad.push(
+    { ...sync, ready: 'true' },
+    { ...sync, firstPlayer: 4 },
+    { ...sync, me: '0' },
+    { ...sync, me: 4 },
+    { ...sync, log: [{ n: 0, by: 0, target: 1, action: shot, result: { kind: 'claim', ok: true } }] },
+    { ...sync, log: [{ n: 0, by: 0, action: shot, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: [] } }] },
+    { ...sync, pending: { n: 0, action: shot } },
+    { ...sync, setHash: 'zz' },
+    { ...sync, players: [] },
+    { ...sync, players: ['a', 'b', 'c', 'd', 'e'] },
+  );
 
   it.each(bad.map((b, i) => [i, b]))('message invalide n°%i rejeté', (_i, b) => {
     expect(parseMessage(typeof b === 'string' ? b : JSON.stringify(b))).toBeNull();
@@ -352,6 +420,8 @@ describe('protocole : messages malformés ou malveillants', () => {
 
   it('un message valide passe', () => {
     expect(parseMessage(JSON.stringify(sync))).not.toBeNull();
-    expect(parseMessage(JSON.stringify({ ...sync, set: TRIANGLES_SET, setHash: setHash(TRIANGLES_SET) }))).not.toBeNull();
+    expect(parseMessage(JSON.stringify({ ...sync, set: TRIANGLES_SET, setHash: setHash(TRIANGLES_SET), players: ['A', 'B', 'C'], launched: true }))).not.toBeNull();
+    expect(parseMessage(JSON.stringify({ t: 'turn', turn: { n: 3, by: 2, target: 1, action: { kind: 'spell', spell: 'hidden' }, result: { kind: 'spell', spell: 'hidden' } } }))).not.toBeNull();
+    expect(parseMessage(JSON.stringify({ t: 'roster', players: ['A', 'B\u0000x'], launched: false }))).toEqual({ t: 'roster', players: ['A', 'Bx'], launched: false });
   });
 });

@@ -12,19 +12,19 @@
  */
 
 import { HEARTBEAT_MS, HEARTBEAT_TIMEOUT_MS, ICE_GATHER_TIMEOUT_MS, ICE_SERVERS } from '../config/network';
-import type { Message } from '../game/protocol';
-import type { Transport } from '../game/transport';
 import { buildSdp, decodeDesc, encodeDesc, parseSdp } from './sdpCodec';
+import type { RawLink } from './hub';
 
 export type LinkState = 'new' | 'waiting-answer' | 'connecting' | 'open' | 'closed' | 'failed';
 
-export class PeerLink implements Transport {
+/** Un lien brut entre deux appareils (voir net/hub.ts pour l'étoile hôte / invités). */
+export class PeerLink implements RawLink {
   private pc: RTCPeerConnection;
   private dc: RTCDataChannel;
   private heartbeat: number | undefined;
   private lastSeen = 0;
   state: LinkState = 'new';
-  onMessage: ((msg: unknown) => void) | null = null;
+  onMessage: ((text: string) => void) | null = null;
   onStatus: ((connected: boolean) => void) | null = null;
   /** Changement d'état détaillé (pour l'écran de connexion). */
   onState: ((s: LinkState) => void) | null = null;
@@ -37,7 +37,7 @@ export class PeerLink implements Transport {
     this.dc.onmessage = (ev) => {
       this.lastSeen = Date.now();
       if (ev.data === '{"t":"ping"}') return; // message de vie
-      this.onMessage?.(ev.data);
+      if (typeof ev.data === 'string') this.onMessage?.(ev.data);
     };
     this.pc.onconnectionstatechange = () => {
       const s = this.pc.connectionState;
@@ -83,16 +83,22 @@ export class PeerLink implements Transport {
     this.heartbeat = undefined;
   }
 
-  private rawSend(s: string): void {
+  /** Dernière erreur d'envoi (message trop gros, canal en cours de fermeture). */
+  onSendError: ((err: unknown, size: number) => void) | null = null;
+
+  private rawSend(s: string): boolean {
+    if (this.dc.readyState !== 'open') return false;
     try {
-      if (this.dc.readyState === 'open') this.dc.send(s);
-    } catch {
-      /* canal en cours de fermeture */
+      this.dc.send(s);
+      return true;
+    } catch (err) {
+      this.onSendError?.(err, s.length);
+      return false;
     }
   }
 
-  send(msg: Message): void {
-    this.rawSend(JSON.stringify(msg));
+  sendRaw(text: string): boolean {
+    return this.rawSend(text);
   }
 
   close(): void {

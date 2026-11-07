@@ -32,6 +32,8 @@ export interface BoardPiece extends Placement {
 export interface EdgeShade {
   edge: Edge;
   kind: 'in' | 'out' | 'in-last' | 'out-last' | 'both-last';
+  /** Couleur du joueur auteur du tir (à 3 ou 4 joueurs, pour distinguer les tireurs). */
+  color?: string;
 }
 
 /** Habillage visuel d'un sort sur la grille. */
@@ -331,10 +333,10 @@ export function createBoard(opts: BoardOptions): BoardView {
   // marge : étiquettes ou bords à viser
   if (G) {
     const gut = s('g', { class: 'gutter' });
-    const shades = new Map<string, EdgeShade['kind']>();
+    const shades = new Map<string, EdgeShade>();
     for (const sh of opts.edgeShades ?? []) {
       const k = `${sh.edge.side}${sh.edge.index}`;
-      if (!shades.has(k) || sh.kind.endsWith('last')) shades.set(k, sh.kind);
+      if (!shades.has(k) || sh.kind.endsWith('last')) shades.set(k, sh);
     }
     for (const side of ['top', 'bottom', 'left', 'right'] as const) {
       for (let i = 0; i < N; i++) {
@@ -352,13 +354,14 @@ export function createBoard(opts: BoardOptions): BoardView {
         const toward = { top: [0, 1], bottom: [0, -1], left: [1, 0], right: [-1, 0] }[side];
         const off = opts.gutter === 'buttons' ? 1.7 : 1.2; // étiquette vers l'extérieur, marqueur côté grille
         gut.append(s('text', { x: cx - toward[0] * off, y: cy - toward[1] * off, class: `edge-label${sel ? ' sel' : ''}` }, label));
-        const shade = shades.get(`${side}${i}`);
-        if (shade) {
+        const sh = shades.get(`${side}${i}`);
+        if (sh) {
+          const shade = sh.kind;
           const mx = cx + toward[0] * (w / 2 - 2.2);
           const my = cy + toward[1] * (hh / 2 - 2.2);
           const last = shade.endsWith('last');
-          if (shade.startsWith('in') || shade === 'both-last') gut.append(s('circle', { cx: mx, cy: my, r: 1.1, class: `mark-in${last ? ' last' : ''}` }));
-          if (shade.startsWith('out') || shade === 'both-last') gut.append(s('circle', { cx: mx, cy: my, r: 1.9, class: `mark-out${last ? ' last' : ''}` }));
+          if (shade.startsWith('in') || shade === 'both-last') gut.append(s('circle', { cx: mx, cy: my, r: 1.1, class: `mark-in${last ? ' last' : ''}`, style: sh.color && !last ? `fill:${sh.color}` : undefined }));
+          if (shade.startsWith('out') || shade === 'both-last') gut.append(s('circle', { cx: mx, cy: my, r: 1.9, class: `mark-out${last ? ' last' : ''}`, style: sh.color && !last ? `stroke:${sh.color}` : undefined }));
         }
       }
     }

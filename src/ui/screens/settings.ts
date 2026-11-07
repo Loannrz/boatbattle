@@ -107,7 +107,7 @@ export function renderSettings(onBack: () => void): HTMLElement {
       'section',
       { class: 'paper-card spells-settings' },
       h('h2', { class: 'section-title' }, 'Sorts'),
-      h('p', { class: 'muted small' }, 'Des pouvoirs spéciaux, gagnés en jouant. Lancer un sort remplace ton tir. Seul le téléphone qui crée la partie décide : l’autre suit ses réglages.'),
+      h('p', { class: 'muted small' }, 'Des pouvoirs spéciaux, gagnés en jouant. Lancer un sort remplace ton tir. Seul le téléphone qui crée la partie décide : les autres suivent ses réglages. Les sorts marqués « 3+ joueurs » n’apparaissent que dans les parties à 3 ou 4.'),
       check('Activer les sorts dans les nouvelles parties', cfg.enabled, (v) => update({ enabled: v })),
       cfg.enabled
         ? h(
@@ -132,7 +132,7 @@ export function renderSettings(onBack: () => void): HTMLElement {
               h('button', { class: 'btn btn-ghost btn-sm', onclick: () => update({ pool: [] }) }, 'Aucun'),
             ),
             ...SPELLS.map((sp) =>
-              check(sp.name, cfg.pool.includes(sp.id), (v) => update({ pool: v ? [...cfg.pool, sp.id] : cfg.pool.filter((x) => x !== sp.id) }), sp.desc),
+              check(`${sp.name}${(sp.minPlayers ?? 2) > 2 ? ` (${sp.minPlayers}+ joueurs)` : ''}`, cfg.pool.includes(sp.id), (v) => update({ pool: v ? [...cfg.pool, sp.id] : cfg.pool.filter((x) => x !== sp.id) }), sp.desc),
             ),
             cfg.pool.length === 0 ? h('p', { class: 'error small' }, 'Aucun sort n’apparaîtra tant que la liste est vide.') : null,
           )
@@ -150,7 +150,7 @@ export function renderSettings(onBack: () => void): HTMLElement {
       { class: 'scroll' },
       spellsSection(),
       h('h2', { class: 'section-title' }, 'Jeu de pièces des nouvelles parties'),
-      h('p', { class: 'muted small' }, 'Le téléphone qui crée la partie choisit le jeu ; l’autre le voit et l’accepte avant de placer ses pièces.'),
+      h('p', { class: 'muted small' }, 'Le téléphone qui crée la partie choisit le jeu ; les autres le voient et l’acceptent avant de placer leurs pièces.'),
       h(
         'div',
         { class: 'set-list', role: 'radiogroup', 'aria-label': 'Jeu de pièces' },
