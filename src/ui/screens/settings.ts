@@ -4,7 +4,7 @@
  */
 
 import { COLORS, COLOR_IDS } from '../../config/pieces';
-import { CORNERS, normalizeParts, rotateParts, setStats, shapeError, type Corner, type Part, type PieceSet, type ShapeDef } from '../../engine';
+import { CORNERS, SPELLS, normalizeParts, rotateParts, setStats, shapeError, type Corner, type Part, type PieceSet, type ShapeDef } from '../../engine';
 import { partsThumb } from '../boardView';
 import { confirmBox, h, icon, modal, s, toast } from '../dom';
 import { ICONS } from '../icons';
@@ -19,6 +19,8 @@ import {
   isBuiltinSet,
   saveSet,
   saveShape,
+  saveSpellConfig,
+  spellConfig,
   setActiveSet,
   setErrors,
   uid,
@@ -87,6 +89,57 @@ export function renderSettings(onBack: () => void): HTMLElement {
     }
   }
 
+  // ---------- sorts ----------
+  function spellsSection(): HTMLElement {
+    const cfg = spellConfig();
+    const update = (patch: Partial<typeof cfg>) => {
+      saveSpellConfig({ ...cfg, ...patch });
+      render();
+    };
+    const check = (label: string, checked: boolean, onChange: (v: boolean) => void, hint?: string) =>
+      h(
+        'label',
+        { class: 'check-row' },
+        h('input', { type: 'checkbox', checked, onchange: (e: Event) => onChange((e.target as HTMLInputElement).checked) }),
+        h('span', null, label, hint ? h('small', { class: 'muted' }, hint) : null),
+      );
+    return h(
+      'section',
+      { class: 'paper-card spells-settings' },
+      h('h2', { class: 'section-title' }, 'Sorts'),
+      h('p', { class: 'muted small' }, 'Des pouvoirs spéciaux, gagnés en jouant. Lancer un sort remplace ton tir. Seul le téléphone qui crée la partie décide : l’autre suit ses réglages.'),
+      check('Activer les sorts dans les nouvelles parties', cfg.enabled, (v) => update({ enabled: v })),
+      cfg.enabled
+        ? h(
+            'div',
+            { class: 'spells-options' },
+            h(
+              'label',
+              { class: 'field' },
+              h('span', null, 'Un sort tous les'),
+              h(
+                'select',
+                { class: 'input', 'aria-label': 'Fréquence des sorts', onchange: (e: Event) => update({ everyTurns: Number((e.target as HTMLSelectElement).value) }) },
+                ...[0, 1, 2, 3, 4, 5, 6, 8, 10].map((n) => h('option', { value: String(n), selected: n === cfg.everyTurns }, n === 0 ? 'jamais (pas de gain par tour)' : n === 1 ? 'tour' : `${n} tours`)),
+              ),
+            ),
+            check('Un sort à chaque pièce adverse coulée', cfg.onSink, (v) => update({ onSink: v })),
+            h('h3', null, `Sorts qui peuvent apparaître (${cfg.pool.length}/${SPELLS.length})`),
+            h(
+              'div',
+              { class: 'btn-row' },
+              h('button', { class: 'btn btn-ghost btn-sm', onclick: () => update({ pool: SPELLS.map((s) => s.id) }) }, 'Tous'),
+              h('button', { class: 'btn btn-ghost btn-sm', onclick: () => update({ pool: [] }) }, 'Aucun'),
+            ),
+            ...SPELLS.map((sp) =>
+              check(sp.name, cfg.pool.includes(sp.id), (v) => update({ pool: v ? [...cfg.pool, sp.id] : cfg.pool.filter((x) => x !== sp.id) }), sp.desc),
+            ),
+            cfg.pool.length === 0 ? h('p', { class: 'error small' }, 'Aucun sort n’apparaîtra tant que la liste est vide.') : null,
+          )
+        : null,
+    );
+  }
+
   // ---------- accueil des réglages ----------
   function homeView(): HTMLElement {
     const active = activeSetId();
@@ -95,6 +148,7 @@ export function renderSettings(onBack: () => void): HTMLElement {
     return h(
       'main',
       { class: 'scroll' },
+      spellsSection(),
       h('h2', { class: 'section-title' }, 'Jeu de pièces des nouvelles parties'),
       h('p', { class: 'muted small' }, 'Le téléphone qui crée la partie choisit le jeu ; l’autre le voit et l’accepte avant de placer ses pièces.'),
       h(

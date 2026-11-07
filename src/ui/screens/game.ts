@@ -30,6 +30,8 @@ import { ICONS } from '../icons';
 import { allSets, isBuiltinSet, setErrors } from '../library';
 import { createPieceEditor, pieceName } from '../pieceEditor';
 import { setDetails } from './settings';
+import { spellsTab } from './spells';
+import { describeSpell } from '../spellText';
 import type { App, GameCtx } from '../app';
 
 // ---------- textes ----------
@@ -57,7 +59,11 @@ function colorChips(colors: string[]): HTMLElement {
   );
 }
 
-function turnSummary(e: TurnEntry, catalog: Catalog | null): HTMLElement {
+function turnSummary(e: TurnEntry, catalog: Catalog | null, session?: PlayerSession): HTMLElement {
+  if (e.action.kind === 'spell') {
+    const self = session && e.by === session.state.me ? session.state.selfLog[String(e.n)] : undefined;
+    return h('span', { class: 'turn-desc' }, h('span', { class: 'tag tag-spell' }, 'Sort'), ' ', describeSpell(e, catalog, self));
+  }
   if (e.action.kind === 'shot' && e.result.kind === 'shot') {
     const same = sameEdge(e.action.edge, e.result.exit);
     return h(
@@ -110,22 +116,33 @@ function sunkAsPlacements(claims: Claim[], catalog: Catalog): { placements: Boar
   return { placements, ids };
 }
 
-function myShots(session: PlayerSession): TurnEntry[] {
-  return session.state.log.filter((e) => e.by === session.state.me && e.action.kind === 'shot');
+/** Mes tirs (simples ou multiples) : entrée choisie et sortie. Un tour = un groupe. */
+function myShots(session: PlayerSession): { edge: Edge; exit: Edge }[][] {
+  const groups: { edge: Edge; exit: Edge }[][] = [];
+  for (const e of session.state.log) {
+    if (e.by !== session.state.me) continue;
+    if (e.action.kind === 'shot' && e.result.kind === 'shot') groups.push([{ edge: e.action.edge, exit: e.result.exit }]);
+    else if (e.action.kind === 'spell' && e.result.kind === 'spell' && e.result.shots && e.action.edges) {
+      const edges = e.action.edges;
+      groups.push(e.result.shots.map((sh, i) => ({ edge: edges[i], exit: sh.exit })).filter((x) => x.edge));
+    }
+  }
+  return groups;
 }
 
 function shotShades(session: PlayerSession): EdgeShade[] {
-  const shots = myShots(session);
+  const groups = myShots(session);
   const out: EdgeShade[] = [];
-  shots.forEach((e, i) => {
-    if (e.action.kind !== 'shot' || e.result.kind !== 'shot') return;
-    const last = i === shots.length - 1;
-    if (sameEdge(e.action.edge, e.result.exit)) {
-      out.push({ edge: e.action.edge, kind: last ? 'both-last' : 'in' }, ...(last ? [] : [{ edge: e.action.edge, kind: 'out' as const }]));
-      return;
+  groups.forEach((g, i) => {
+    const last = i === groups.length - 1;
+    for (const { edge, exit } of g) {
+      if (sameEdge(edge, exit)) {
+        out.push({ edge, kind: last ? 'both-last' : 'in' }, ...(last ? [] : [{ edge, kind: 'out' as const }]));
+        continue;
+      }
+      out.push({ edge, kind: last ? 'in-last' : 'in' });
+      out.push({ edge: exit, kind: last ? 'out-last' : 'out' });
     }
-    out.push({ edge: e.action.edge, kind: last ? 'in-last' : 'in' });
-    out.push({ edge: e.result.exit, kind: last ? 'out-last' : 'out' });
   });
   return out;
 }
@@ -381,6 +398,7 @@ export function renderPlaying(app: App, ctx: GameCtx, session: PlayerSession): H
   const tab = app.ui.tab;
   let content: HTMLElement;
   if (tab === 'notes') content = notesTab(app, session);
+  else if (tab === 'spells' && session.state.spellCfg.enabled) content = spellsTab(app, session);
   else if (tab === 'board') content = boardTab(app, session);
   else content = shootTab(app, ctx, session);
 
@@ -404,6 +422,7 @@ export function renderPlaying(app: App, ctx: GameCtx, session: PlayerSession): H
       { class: 'tabbar', role: 'tablist', 'aria-label': 'Navigation' },
       tabBtn('shoot', 'Tirer', ICONS.laser),
       tabBtn('notes', 'Carnet', ICONS.notes),
+      session.state.spellCfg.enabled ? tabBtn('spells', 'Sorts', ICONS.wand, session.state.spells.length > 0 && session.isMyTurn && !session.state.pending) : null,
       tabBtn('board', 'Mon plateau', ICONS.board, app.ui.unseenIncoming),
     ),
   );
@@ -464,7 +483,7 @@ function shootTab(app: App, ctx: GameCtx, session: PlayerSession): HTMLElement {
         'div',
         { class: 'card card-busy' },
         h('span', { class: 'spinner', 'aria-hidden': 'true' }),
-        h('span', null, st.pending.action.kind === 'shot' ? `Tir ${edgeLabel(st.pending.action.edge)} envoyé, en attente du résultat…` : 'Déclaration envoyée, vérification…'),
+        h('span', null, st.pending.action.kind === 'shot' ? `Tir ${edgeLabel(st.pending.action.edge)} envoyé, en attente du résultat…` : st.pending.action.kind === 'spell' ? 'Sort lancé, en attente du résultat…' : 'Déclaration envoyée, vérification…'),
         ctx.mode === 'online' ? h('button', { class: 'btn btn-sm btn-ghost', onclick: () => session.resendPending() }, 'Renvoyer') : null,
       ),
     );
@@ -478,7 +497,7 @@ function shootTab(app: App, ctx: GameCtx, session: PlayerSession): HTMLElement {
 
   const lastMine = [...st.log].reverse().find((e) => e.by === st.me);
   const lastTheirs = [...st.log].reverse().find((e) => e.by !== st.me);
-  if (lastMine) parts.push(h('div', { class: 'card card-result' }, h('div', { class: 'card-label' }, 'Ton dernier coup'), turnSummary(lastMine, cat)));
+  if (lastMine) parts.push(h('div', { class: 'card card-result' }, h('div', { class: 'card-label' }, 'Ton dernier coup'), turnSummary(lastMine, cat, session)));
 
   parts.push(board.root);
 
@@ -522,7 +541,7 @@ function shootTab(app: App, ctx: GameCtx, session: PlayerSession): HTMLElement {
         'button',
         { class: 'card card-incoming', onclick: () => app.setUi({ tab: 'board', viewTurn: lastTheirs.n }) },
         h('div', { class: 'card-label' }, `Dernier coup de ${st.oppName || 'l’adversaire'}`),
-        turnSummary(lastTheirs, cat),
+        turnSummary(lastTheirs, cat, session),
         h('span', { class: 'card-link' }, icon(ICONS.eye), 'Voir sur mon plateau'),
       ),
     );
@@ -536,7 +555,7 @@ function shootTab(app: App, ctx: GameCtx, session: PlayerSession): HTMLElement {
       h('h3', null, 'Historique'),
       hist.length === 0
         ? h('p', { class: 'muted small' }, 'Aucun coup pour l’instant.')
-        : h('ol', { class: 'history-list' }, ...hist.map((e) => h('li', { class: e.by === st.me ? 'mine' : 'theirs' }, h('span', { class: 'who' }, e.by === st.me ? 'Toi' : st.oppName || 'Adv.'), turnSummary(e, cat)))),
+        : h('ol', { class: 'history-list' }, ...hist.map((e) => h('li', { class: e.by === st.me ? 'mine' : 'theirs' }, h('span', { class: 'who' }, e.by === st.me ? 'Toi' : st.oppName || 'Adv.'), turnSummary(e, cat, session)))),
     ),
   );
   return h('div', { class: 'tab-content' }, ...parts);
@@ -568,7 +587,7 @@ function notesTab(app: App, session: PlayerSession): HTMLElement {
 
   let boardEl: HTMLElement;
   if (tool === 'shapes') {
-    const trayIds = cat.pieces.map((p) => p.id).filter((id) => !sunk.ids.has(id));
+    const trayIds = session.oppPieces.map((p) => p.id).filter((id) => !sunk.ids.has(id));
     boardEl = createPieceEditor({
       key: `notes-${st.me}-${session.mySetHash}`,
       catalog: cat,
@@ -634,7 +653,7 @@ function notesTab(app: App, session: PlayerSession): HTMLElement {
     h(
       'ul',
       { class: 'legend-list' },
-      ...cat.pieces.map((p) => {
+      ...session.oppPieces.map((p) => {
         const state = sunk.ids.has(p.id) ? 'coulée' : guesses.some((g) => g.pieceId === p.id) ? 'supposée' : '';
         return h(
           'li',
@@ -690,11 +709,20 @@ function boardTab(app: App, session: PlayerSession): HTMLElement {
   const viewed = received.find((e) => e.n === viewN) ?? null;
 
   const pieces: BoardPiece[] = st.placement.map((p) => ({ ...p, style: sunk.has(p.pieceId) ? 'sunk' : 'normal' }));
-  const paths = viewed?.secret?.path?.length ? [{ points: viewed.secret.path }] : [];
+  const allPaths = viewed?.secret?.paths?.length ? viewed.secret.paths : viewed?.secret?.path?.length ? [viewed.secret.path] : [];
+  const paths = allPaths.filter((p) => p.length).map((points) => ({ points }));
   const shades: EdgeShade[] = [];
   if (viewed && viewed.action.kind === 'shot' && viewed.result.kind === 'shot') {
     if (sameEdge(viewed.action.edge, viewed.result.exit)) shades.push({ edge: viewed.action.edge, kind: 'both-last' });
     else shades.push({ edge: viewed.action.edge, kind: 'in-last' }, { edge: viewed.result.exit, kind: 'out-last' });
+  }
+  if (viewed && viewed.action.kind === 'spell' && viewed.result.kind === 'spell' && viewed.result.shots && viewed.action.edges) {
+    viewed.result.shots.forEach((sh, i) => {
+      const edge = viewed.action.kind === 'spell' ? viewed.action.edges?.[i] : undefined;
+      if (!edge) return;
+      if (sameEdge(edge, sh.exit)) shades.push({ edge, kind: 'both-last' });
+      else shades.push({ edge, kind: 'in-last' }, { edge: sh.exit, kind: 'out-last' });
+    });
   }
   const claimCells = viewed?.action.kind === 'claim' ? viewed.action.claim.cells : [];
   const board = createBoard({
@@ -708,13 +736,13 @@ function boardTab(app: App, session: PlayerSession): HTMLElement {
     marks: Object.fromEntries(claimCells.map((c) => [cellKey(c), '?' as NoteMark])),
   });
 
-  const remaining = st.placement.length - sunk.size;
+  const remaining = st.placement.length - st.placement.filter((p) => sunk.has(p.pieceId)).length;
   return h(
     'div',
     { class: 'tab-content' },
     h('h2', { class: 'screen-title' }, 'Mon plateau', h('span', { class: 'count' }, `${remaining}/${st.placement.length} pièces à flot`)),
     viewed
-      ? h('div', { class: 'card card-result' }, h('div', { class: 'card-label' }, `Coup reçu n°${received.indexOf(viewed) + 1}`), turnSummary(viewed, cat))
+      ? h('div', { class: 'card card-result' }, h('div', { class: 'card-label' }, `Coup reçu n°${received.indexOf(viewed) + 1}`), turnSummary(viewed, cat, session))
       : h('p', { class: 'muted small' }, 'Tu n’as encore reçu aucun tir.'),
     board.root,
     received.length
@@ -729,7 +757,7 @@ function boardTab(app: App, session: PlayerSession): HTMLElement {
               h(
                 'li',
                 { class: e.n === viewN ? 'active' : '' },
-                h('button', { class: 'history-btn', 'aria-pressed': e.n === viewN ? 'true' : 'false', onclick: () => app.setUi({ viewTurn: e.n }) }, h('span', { class: 'who' }, `n°${received.indexOf(e) + 1}`), turnSummary(e, cat)),
+                h('button', { class: 'history-btn', 'aria-pressed': e.n === viewN ? 'true' : 'false', onclick: () => app.setUi({ viewTurn: e.n }) }, h('span', { class: 'who' }, `n°${received.indexOf(e) + 1}`), turnSummary(e, cat, session)),
               ),
             ),
           ),

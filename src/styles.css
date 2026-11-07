@@ -1100,7 +1100,8 @@ svg.board:focus-visible {
 
 .tabbar {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   background: var(--paper-2);
   border-top: 1px solid var(--line);
   padding-bottom: var(--safe-bottom);
@@ -1642,3 +1643,25 @@ svg.board:focus-visible {
   display: grid;
   place-items: center;
 }
+
+/* ---------- sorts ---------- */
+.spell-list { display: grid; gap: 10px; margin: 10px 0; }
+.spell-card { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--paper-2); display: grid; gap: 6px; }
+.spell-card.spell-ref { border-style: dashed; opacity: .92; }
+.spell-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spell-card .btn { justify-self: start; }
+.spell-all { margin: 12px 0; }
+.spell-all summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.tag-spell { background: #6b4fb3; color: #fff; }
+.pick-grid { display: grid; gap: 8px; margin-top: 8px; }
+.pick-btn { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; }
+.pick-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.4); }
+.cell-picker { display: grid; gap: 2px; margin-top: 8px; }
+.cp-head { font-size: 11px; text-align: center; color: var(--muted); align-self: center; }
+.cp-cell { aspect-ratio: 1; border: 1px solid rgba(0,0,0,.35); border-radius: 4px; background: transparent; padding: 0; min-width: 0; }
+.cp-cell:active { background: rgba(107,79,179,.35); }
+.check-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
+.check-row input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
+.check-row small { display: block; }
+.spells-settings { margin-bottom: 18px; }
+.spells-options { display: grid; gap: 4px; }

@@ -16,10 +16,11 @@ import { renderConnect, type ConnectOptions } from './screens/connect';
 import { renderHandoff, renderOver, renderPlacement, renderPlaying, renderReview, renderWaiting } from './screens/game';
 import { renderHome, rulesContent } from './screens/home';
 import { renderSettings } from './screens/settings';
-import { activeSet } from './library';
+import { activeSet, spellConfig } from './library';
+import { describeSpell, spellName } from './spellText';
 import { store } from './storage';
 
-export type Tab = 'shoot' | 'notes' | 'board';
+export type Tab = 'shoot' | 'notes' | 'spells' | 'board';
 export type Tool = 'x' | 'o' | '?' | 'erase' | 'shapes';
 
 export interface UiState {
@@ -203,7 +204,7 @@ export class App {
     this.clearSaved();
     this.closeLink();
     const session = new PlayerSession(
-      freshState('online', role === 'host' ? 0 : 1, name, role === 'host' ? newGameId() : '', role === 'host' ? activeSet() : null),
+      freshState('online', role === 'host' ? 0 : 1, name, role === 'host' ? newGameId() : '', role === 'host' ? activeSet() : null, spellConfig()),
       store,
       keyFor('online', 0),
     );
@@ -242,8 +243,9 @@ export class App {
     this.clearSaved();
     const gameId = newGameId();
     const set = activeSet(); // même jeu pour les deux joueurs, accepté d'office
-    const a = new PlayerSession(freshState(mode, 0, name0, gameId, set), store, keyFor(mode, 0));
-    const b = new PlayerSession(freshState(mode, 1, name1, gameId, set), store, keyFor(mode, 1));
+    const cfg = spellConfig();
+    const a = new PlayerSession(freshState(mode, 0, name0, gameId, set, cfg), store, keyFor(mode, 0));
+    const b = new PlayerSession(freshState(mode, 1, name1, gameId, set, cfg), store, keyFor(mode, 1));
     a.persist();
     b.persist();
     store.setItem(KEY_CURRENT, mode);
@@ -298,6 +300,9 @@ export class App {
         buzz(25);
         // Le résultat d'un tir s'affiche déjà dans la carte « Ton dernier coup ».
         if (e.entry.result.kind === 'claim') toast(describeTurn(e.entry), e.entry.result.ok ? 'ok' : 'warn', 4500);
+        break;
+      case 'spell-gained':
+        if (isViewer) toast(`Nouveau sort : ${spellName(e.spell)}`, 'ok', 3500);
         break;
       case 'started': {
         if (ctx.mode === 'local') {
@@ -498,7 +503,10 @@ export class App {
   rematch(): void {
     const ctx = this.ctx;
     if (ctx.kind !== 'game') return;
-    ctx.sessions[ctx.viewer]!.startNewGame();
+    const me = ctx.sessions[ctx.viewer]!;
+    // La revanche part de l'hôte (joueur 0) quand on joue sur un seul appareil : il impose les réglages des sorts.
+    if (ctx.mode === 'online') me.startNewGame(undefined, me.state.me === 0 ? spellConfig() : undefined);
+    else ctx.sessions[0]!.startNewGame(undefined, spellConfig());
     this.ui = defaultUi();
     if (ctx.mode === 'local') {
       ctx.viewer = 0;
@@ -583,5 +591,6 @@ export function describeTurn(e: TurnEntry): string {
     return `tir ${edgeLabel(e.action.edge)}, ${where}, ${hit}.`;
   }
   if (e.result.kind === 'claim') return e.result.ok ? (RULES.correctClaimPassesTurn ? 'déclaration juste, pièce coulée ; le tour passe.' : 'déclaration juste, pièce coulée ; il rejoue.') : 'déclaration fausse, tour perdu.';
+  if (e.result.kind === 'spell') return `sort : ${describeSpell(e, null)}.`;
   return '';
 }

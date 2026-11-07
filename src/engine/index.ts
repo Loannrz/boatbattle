@@ -5,3 +5,4 @@ export * from './board';
 export * from './laser';
 export * from './claim';
 export * from './turns';
+export * from './spells';

@@ -4,7 +4,7 @@
  */
 
 import { BUILTIN_SETS, BUILTIN_SHAPES, COLOR_IDS, DEFAULT_SET } from '../config/pieces';
-import { catalogFits, pieceSetErrors, shapeError, type PieceSet, type ShapeDef } from '../engine';
+import { DEFAULT_SPELL_CONFIG, catalogFits, cloneSpellConfig, pieceSetErrors, sanitizeSpellConfig, shapeError, type PieceSet, type ShapeDef, type SpellConfig } from '../engine';
 import { store } from './storage';
 
 const KEY_SHAPES = 'bb.shapes';
@@ -110,4 +110,24 @@ export function activeSet(): PieceSet {
   const set = allSets().find((s) => s.id === activeSetId());
   if (!set || (!isBuiltinSet(set.id) && setErrors(set).length > 0)) return DEFAULT_SET;
   return set;
+}
+
+// ---------- réglages des sorts ----------
+
+const KEY_SPELLS = 'bb.spellCfg';
+
+/** Réglages des sorts pour les nouvelles parties (désactivés par défaut). */
+export function spellConfig(): SpellConfig {
+  try {
+    const raw = store.getItem(KEY_SPELLS);
+    const cfg = raw ? sanitizeSpellConfig(JSON.parse(raw)) : null;
+    if (cfg) return cfg;
+  } catch {
+    /* réglages abîmés : valeurs par défaut */
+  }
+  return cloneSpellConfig(DEFAULT_SPELL_CONFIG);
+}
+
+export function saveSpellConfig(cfg: SpellConfig): void {
+  store.setItem(KEY_SPELLS, JSON.stringify(cfg));
 }

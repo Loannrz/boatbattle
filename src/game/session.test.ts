@@ -4,7 +4,7 @@ import { RULES } from '../config/rules';
 import { buildGrid, catalogOf, placementParts, randomPlacement, seededRandom, setHash, traceLaser } from '../engine';
 import { PlayerSession, freshState, newGameId, type KeyValueStore, type SessionEvent } from './session';
 import { createLocalPair, type LocalTransport } from './transport';
-import { appFingerprint, parseMessage, type Message } from './protocol';
+import { PROTOCOL_VERSION, appFingerprint, parseMessage, type Message } from './protocol';
 
 const flush = async () => {
   for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
@@ -252,7 +252,7 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
     // L'hôte prétend avoir coulé une pièce en gagnant la partie, sans l'avoir fait.
     guest.receive(
       JSON.stringify({
-        t: 'sync', v: 2, fp: appFingerprint(), gameId: guest.state.gameId, me: 0, name: 'Alice', ready: true, firstPlayer: 0, pending: null,
+        t: 'sync', v: PROTOCOL_VERSION, fp: appFingerprint(), gameId: guest.state.gameId, me: 0, name: 'Alice', ready: true, firstPlayer: 0, pending: null,
         set: CLASSIC_SET, setHash: setHash(CLASSIC_SET),
         log: [{ n: 0, by: 0, action: { kind: 'claim', claim: { color: 'rouge', shape: 'carre', cells: [{ r: 9, c: 9 }] } }, result: { kind: 'claim', ok: true, gameOver: true } }],
       }),
@@ -266,7 +266,7 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
     const errs = events(guest);
     guest.receive(
       JSON.stringify({
-        t: 'sync', v: 2, fp: appFingerprint(), gameId: guest.state.gameId, me: 0, name: 'Alice', ready: true, firstPlayer: 0, pending: null,
+        t: 'sync', v: PROTOCOL_VERSION, fp: appFingerprint(), gameId: guest.state.gameId, me: 0, name: 'Alice', ready: true, firstPlayer: 0, pending: null,
         set: CLASSIC_SET, setHash: setHash(CLASSIC_SET),
         log: [...guest.state.log.map(({ n, by, action, result }) => ({ n, by, action, result })), { n: 1, by: 0, action: { kind: 'shot', edge: { side: 'top', index: 0 } }, result: { kind: 'shot', exit: { side: 'top', index: 0 }, colors: [] } }],
       }),
@@ -280,7 +280,7 @@ describe('session : coupures, reconnexion et journal non fiable', () => {
   it('versions différentes : la synchronisation est refusée', async () => {
     const guest = new PlayerSession(freshState('online', 1, 'Bob', '', null));
     const errs = events(guest);
-    guest.receive(JSON.stringify({ t: 'sync', v: 2, fp: '0000000000000000', gameId: 'abc', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: CLASSIC_SET, setHash: setHash(CLASSIC_SET) }));
+    guest.receive(JSON.stringify({ t: 'sync', v: PROTOCOL_VERSION, fp: '0000000000000000', gameId: 'abc', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: CLASSIC_SET, setHash: setHash(CLASSIC_SET) }));
     expect(guest.state.gameId).toBe('');
     expect(guest.state.proposedSet).toBeNull();
     expect(errs[0]?.type).toBe('error');
@@ -343,7 +343,7 @@ describe('protocole : messages malformés ou malveillants', () => {
     { t: 'newgame', gameId: 'x', set: { ...CLASSIC_SET, entries: [{ shape: 'tri4', color: 'bleu', count: 6 }], shapes: TRIANGLES_SET.shapes } },
     { t: 'set-accept', hash: '__proto__' },
   ];
-  const sync = { t: 'sync', v: 2, fp: 'x', gameId: 'g', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: null, setHash: null };
+  const sync = { t: 'sync', v: PROTOCOL_VERSION, fp: 'x', gameId: 'g', me: 0, name: 'A', ready: false, firstPlayer: null, log: [], pending: null, set: null, setHash: null };
   bad.push({ ...sync, ready: 'true' }, { ...sync, firstPlayer: 3 }, { ...sync, me: '0' }, { ...sync, log: [{ n: 0, by: 0, action: { kind: 'shot', edge: { side: 'top', index: 0 } }, result: { kind: 'claim', ok: true } }] }, { ...sync, setHash: 'zz' });
 
   it.each(bad.map((b, i) => [i, b]))('message invalide n°%i rejeté', (_i, b) => {
